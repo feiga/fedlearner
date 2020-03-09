@@ -129,7 +129,7 @@ class Bridge(object):
                     if response.status.code != common_pb.STATUS_SUCCESS:
                         raise RuntimeError("Trainsmit failed with %d" %
                                            response.status.code)
-                    logging.info("Transmit success with %d",
+                    logging.debug("Transmit success with %d",
                                  response.status.code)
                     with lock:
                         while resend_list and \
@@ -239,11 +239,11 @@ class Bridge(object):
             logging.debug('Bridge connected as follower')
 
         if self._streaming_mode:
-            logging.info('enter streaming_mode.')
+            logging.debug('enter streaming_mode.')
             self._client_daemon = threading.Thread(
                 target=self._client_daemon_fn)
             self._client_daemon.start()
-        logging.info('finish connect.')
+        logging.debug('finish connect.')
 
     def terminate(self):
         try:
