@@ -192,7 +192,7 @@ type FLAppSpec struct {
 	Role string `json:"role"`
 
 	// Defines all the controllers involved in the app
-	Peers PeerSpecs `json:"peerSpecs"`
+	PeerSpecs PeerSpecs `json:"peerSpecs"`
 }
 
 // FLAppStatus is the status for a FLApp resource

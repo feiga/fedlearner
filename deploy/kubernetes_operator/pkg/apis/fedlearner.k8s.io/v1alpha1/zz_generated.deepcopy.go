@@ -115,8 +115,8 @@ func (in *FLAppSpec) DeepCopyInto(out *FLAppSpec) {
 			(*out)[key] = *val.DeepCopy()
 		}
 	}
-	if in.Peers != nil {
-		in, out := &in.Peers, &out.Peers
+	if in.PeerSpecs != nil {
+		in, out := &in.PeerSpecs, &out.PeerSpecs
 		*out = make(PeerSpecs, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
