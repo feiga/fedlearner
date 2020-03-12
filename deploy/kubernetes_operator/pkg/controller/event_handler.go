@@ -52,30 +52,16 @@ type AppEventHandler interface {
 }
 
 type appEventHandler struct {
-	peerURL   string
 	namespace string
 	crdClient crdclientset.Interface
-
-	grpcClient pb.PairingServiceClient
 }
 
 var _ AppEventHandler = &appEventHandler{}
 
-func NewAppEventHandler(peerURL, grpcDefaultAuthority, namespace string, crdClient crdclientset.Interface) AppEventHandler {
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	if grpcDefaultAuthority != "" {
-		opts = append(opts, grpc.WithAuthority(grpcDefaultAuthority))
-	}
-	connection, err := grpc.Dial(peerURL, opts...)
-	if err != nil {
-		klog.Fatalf("failed to create connection, err = %v", err)
-	}
-	client := pb.NewPairingServiceClient(connection)
+func NewAppEventHandler(namespace string, crdClient crdclientset.Interface) AppEventHandler {
 	return &appEventHandler{
-		peerURL:    peerURL,
-		namespace:  namespace,
-		crdClient:  crdClient,
-		grpcClient: client,
+		namespace: namespace,
+		crdClient: crdClient,
 	}
 }
 
@@ -101,7 +87,7 @@ func (handler *appEventHandler) Register(app *v1alpha1.FLApp) error {
 		Role:  app.Spec.Role,
 		Pairs: pairs,
 	}
-	response, err := handler.grpcClient.Register(newContextXHost(), request)
+	response, err := handler.grpcClient.Register(newContextWithXHost(), request)
 	if err != nil || response.Code != int32(codes.OK) {
 		return fmt.Errorf("Register failed, name = %v, err = %v", name, err)
 	}
@@ -136,7 +122,7 @@ func (handler *appEventHandler) Pair(app *v1alpha1.FLApp) error {
 		AppId: name,
 		Pairs: pairs,
 	}
-	response, err := handler.grpcClient.Pair(newContextXHost(), request)
+	response, err := handler.grpcClient.Pair(newContextWithXHost(), request)
 	if err != nil || response.Code != int32(codes.OK) {
 		return fmt.Errorf("Pair failed name = %v, err = %v", name, err)
 	}
@@ -150,7 +136,7 @@ func (handler *appEventHandler) Shutdown(app *v1alpha1.FLApp) error {
 		AppId: name,
 		Role:  app.Spec.Role,
 	}
-	response, err := handler.grpcClient.ShutDown(newContextXHost(), request)
+	response, err := handler.grpcClient.ShutDown(newContextWithXHost(), request)
 	if err != nil || response.Code != int32(codes.OK) {
 		return fmt.Errorf("Shutdown failed name = %v, err = %v", name, err)
 	}
@@ -164,7 +150,7 @@ func (handler *appEventHandler) Finish(app *v1alpha1.FLApp) error {
 		AppId: name,
 		Role:  app.Spec.Role,
 	}
-	response, err := handler.grpcClient.Finish(newContextXHost(), request)
+	response, err := handler.grpcClient.Finish(newContextWithXHost(), request)
 	if err != nil || response.Code != int32(codes.OK) {
 		return fmt.Errorf("Finish failed name = %v, err = %v", name, err)
 	}
@@ -316,7 +302,19 @@ func (handler *appEventHandler) FinishHandler(name string) (*pb.Status, error) {
 	}, nil
 }
 
-func newContextXHost() context.Context {
+func newClient(peerURL, authority string) (pb.PairingServiceClient, error) {
+	opts := []grpc.DialOption{grpc.WithInsecure()}
+	if authority != "" {
+		opts = append(opts, grpc.WithAuthority(authority))
+	}
+	connection, err := grpc.Dial(peerURL, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return pb.NewPairingServiceClient(connection), nil
+}
+
+func newContextWithXHost() context.Context {
 	return newContextWithHeader("x-host", "flapp.operator")
 }
 
