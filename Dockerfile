@@ -1,4 +1,4 @@
-FROM python:2.7
+FROM tensorflow/tensorflow:1.15.2
 
 WORKDIR /app
 
