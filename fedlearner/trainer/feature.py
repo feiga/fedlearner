@@ -91,8 +91,6 @@ class FeatureSlot(object):
 
         self._bias_optimizer = bias_optimizer or FeatureSlot._default_bias_optimizer
         assert self._bias_optimizer is not None, msg.format(n='bias_optimizer')
-        assert isinstance(self._bias_optimizer, optimizer.SparseOptimizer), \
-            "bias_optimizer must be an instance of SparseOptimizer"
 
         self._vec_initializer = vec_initializer or FeatureSlot._default_vec_initializer
         self._vec_optimizer = vec_optimizer or FeatureSlot._default_vec_optimizer
@@ -124,8 +122,6 @@ class FeatureSlot(object):
         msg = "Please either set {n} or use FeatureSlot.set_default_{n} to set a global default"
         assert self._vec_initializer is not None, msg.format(n='vec_initializer')
         assert self._vec_optimizer is not None, msg.format(n='vec_optimizer')
-        assert isinstance(self._vec_optimizer, optimizer.SparseOptimizer), \
-            "bias_optimizer must be an instance of SparseOptimizer"
 
         sslice = FeatureSlice(self, self._feature_dim, dim)
         self._feature_dim += dim

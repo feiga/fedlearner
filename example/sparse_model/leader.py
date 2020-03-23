@@ -29,8 +29,7 @@ args = parser.parse_args()
 def input_fn(bridge, trainer_master=None):
     dataset = flt.data.DataBlockLoader(
         args.batch_size, ROLE, bridge, trainer_master)
-    feature_map = {"x_{0}".format(i): tf.VarLenFeature(
-        tf.int64) for i in range(512)}
+    feature_map = {"fids": tf.VarLenFeature(tf.int64) }
     feature_map["example_id"] = tf.FixedLenFeature([], tf.string)
     feature_map["y"] = tf.FixedLenFeature([], tf.int64)
 
@@ -41,8 +40,7 @@ def input_fn(bridge, trainer_master=None):
 
 
 def serving_input_receiver_fn():
-    feature_map = {"x_{0}".format(i): tf.VarLenFeature(
-        tf.int64) for i in range(512)}
+    feature_map = {"fids": tf.VarLenFeature(tf.int64)}
     feature_map["example_id"] = tf.FixedLenFeature([], tf.string)
 
     record_batch = tf.placeholder(dtype=tf.string, name='examples')
@@ -63,27 +61,23 @@ def model_fn(model, features, labels, mode):
     """
     global_step = tf.train.get_or_create_global_step()
 
-    x = dict()
-    for i in range(512):
-        x_name = "x_{}".format(i)
-        x[x_name] = features[x_name]
-
+    flt.feature.FeatureSlot.set_default_bias_initializer(tf.zeros_initializer())
+    flt.feature.FeatureSlot.set_default_vec_initializer(tf.random_uniform_initializer(-0.0078125, 0.0078125))
+    flt.feature.FeatureSlot.set_default_bias_optimizer(tf.train.FtrlOptimizer(learning_rate=0.01))
+    flt.feature.FeatureSlot.set_default_vec_optimizer(tf.train.AdagradOptimizer(learning_rate=0.01))
 
     num_slot = 512
-    fid_size, embed_size = [101] * num_slot, 32
-    embeddings = [
-        tf.get_variable(
-            'slot_emb{0}'.format(i), shape=[fid_size[i], embed_size],
-            dtype=tf.float32,
-            initializer=tf.random_uniform_initializer(-0.01, 0.01))
-        for i in range(num_slot)]
-    embed_output = tf.concat(
-        [
-            tf.nn.embedding_lookup_sparse(
-                embeddings[i], x['x_{}'.format(i)], sp_weights=None,
-                combiner='mean')
-            for i in range(512)],
-        axis=1)
+    hash_size = 101
+    embed_size = 16
+
+    for slot_id in range(0, 512):
+        fs = model.add_feature_slot(slot_id, hash_size)
+        fc = model.add_feature_column(fs)
+        fc.add_vector(embed_size)
+
+    model.freeze_slots(features)
+
+    embed_output = model.get_vec()
 
     output_size = num_slot * embed_size
     fc1_size, fc2_size = 256, 64

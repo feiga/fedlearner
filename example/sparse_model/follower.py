@@ -30,8 +30,7 @@ args = parser.parse_args()
 def input_fn(bridge, trainer_master=None):
     dataset = flt.data.DataBlockLoader(
         args.batch_size, ROLE, bridge, trainer_master)
-    feature_map = {"x_{0}".format(i): tf.VarLenFeature(
-        tf.int64) for i in range(512, 1024)}
+    feature_map = {"fid": tf.VarLenFeature(tf.int64)}
     feature_map["example_id"] = tf.FixedLenFeature([], tf.string)
 
     record_batch = dataset.make_batch_iterator().get_next()
@@ -40,8 +39,7 @@ def input_fn(bridge, trainer_master=None):
 
 
 def serving_input_receiver_fn():
-    feature_map = {"x_{0}".format(i): tf.VarLenFeature(
-        tf.int64) for i in range(512, 1024)}
+    feature_map = { "fid": tf.VarLenFeature(tf.int64) }
     feature_map["example_id"] = tf.FixedLenFeature([], tf.string)
 
     record_batch = tf.placeholder(dtype=tf.string, name='examples')
@@ -50,24 +48,21 @@ def serving_input_receiver_fn():
         features, {'examples': record_batch})
 
 
+
 def model_fn(model, features, labels, mode):
     global_step = tf.train.get_or_create_global_step()
 
-    x = [features['x_{0}'.format(i)] for i in range(512, 1024)]
-
     num_slot = 512
-    fid_size, embed_size = [101] * num_slot, 64
-    embeddings = [
-        tf.get_variable('slot_emb{0}'.format(i),
-                        shape=[fid_size[i], embed_size], dtype=tf.float32,
-                        initializer=tf.random_uniform_initializer(-0.01, 0.01))
-                        for i in range(num_slot)]
-    embed_output = tf.concat(
-        [
-            tf.nn.embedding_lookup_sparse(
-                embeddings[i], x[i], sp_weights=None, combiner='mean')
-            for i in range(num_slot)],
-        axis=1)
+    hash_size = 101
+    embed_size=16
+    for slot_id in range(512, 1024):
+        fs = model.add_feature_slot(slot_id, hash_size)
+        fc = model.add_feature_column(fs)
+        fc.add_vector(embed_size)
+
+    model.freeze_slots()
+
+    embed_output = model.get_vec()
 
     output_size = num_slot * embed_size
     fc1_size = 64

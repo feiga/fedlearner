@@ -1,4 +1,18 @@
-# -*- encoding=utf-8 -*-
+# Copyright 2020 The FedLearner Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# coding: utf-8
 
 from __future__ import absolute_import
 from __future__ import division
@@ -37,7 +51,7 @@ def _multidevice_preprocess_fids(fids, config, num_shards):
         ret = lagrange_lite_ops.lagrange_multi_device_preprocess_fid(
             num_weights=config['num_groups'],
             num_shards=num_shards,
-            use_fid_v2=config['use_fid_v2'],
+            use_fid_v2=False,
             total_weights=num_shards*config['num_groups'],
             instance_ids=fids.indices,
             fids=fids.values,
@@ -78,7 +92,7 @@ def _embedding_pooling_gradient(op, grad):
     values = lagrange_lite_ops.lagrange_embedding_unpooling(
         num_weights=num_weights,
         weight_sizes=op.get_attr('weight_sizes'),
-        use_fid_v2=op.get_attr('use_fid_v2'),
+        use_fid_v2=False,
         output_grad=grad,
         instance_ids=op.inputs[1],
         fids=op.inputs[2],

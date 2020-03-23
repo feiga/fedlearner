@@ -15,17 +15,16 @@
 # coding: utf-8
 # pylint: disable=protected-access
 
-# -*- encoding=utf-8 -*-
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from lagrange_lite.sparse import feature
-from lagrange_lite.sparse import utils
-from lagrange_lite.sparse import operator
+from fedlearner.trainer import feature
+from fedlearner.trainer import operator
+from fedlearner.trainer import utils
 
 import tensorflow.compat.v1 as tf
+
 
 def _sharded_size(total_size, shard_id, num_shards):
     return int(total_size / num_shards) + ((total_size % num_shards) > shard_id)
@@ -36,17 +35,16 @@ class Embedding(object):
         self._config = config
         self._devices = devices
         self._num_shards = len(devices)
-        self._use_fid_v2 = config['use_fid_v2']
 
         self._weights = []
         with tf.variable_scope("lagrange_embedding_pooling/%s"%config['name']):
             for i in range(config['num_groups']):
                 shards = []
                 for shard_id in range(self._num_shards):
-                    with tf.device(self._devices[shard_id]), tf.compat.v1.variable_scope('shard_%d'%shard_id):
+                    with tf.device(self._devices[shard_id]), tf.variable_scope('shard_%d'%shard_id):
                         weight_name = 'embedding_weight_' + '_'.join([
                             str(j) for j, k in enumerate(config['slot_weight_index']) if k == i])
-                        shards.append(tf.compat.v1.get_variable(
+                        shards.append(tf.get_variable(
                             name=weight_name,
                             shape=(_sharded_size(config['weight_hash_sizes'][i], shard_id, self._num_shards), config['weight_sizes'][i]),
                             initializer=config['initializers'][i]
@@ -81,15 +79,17 @@ class Embedding(object):
         fids = features.pop(fmt+'fids')
 
         bwd_deps = [
-            tf.identity(num_unique_fids_per_partition, name="%s_Identity_num_unique_fids_per_partition"%(fmt)),
-            tf.identity(fid_to_unique_index, name="%s_Identity_fid_to_unique_index"%(fmt)),
-        ] + [tf.identity(t, name="%s_Identity_unique_fid_hash_%d"%(fmt, i)) for (i,t) in enumerate(unique_fid_hash)]
+            tf.identity(num_unique_fids_per_partition,
+                        name="%s_Identity_num_unique_fids_per_partition"%(fmt)),
+            tf.identity(fid_to_unique_index,
+                        name="%s_Identity_fid_to_unique_index"%(fmt)),] + [
+            tf.identity(t, name="%s_Identity_unique_fid_hash_%d"%(fmt, i)) for (i,t) in enumerate(unique_fid_hash)
+        ]
 
         with tf.control_dependencies(bwd_deps):
             output = operator.lagrange_lite_ops.lagrange_embedding_pooling(
                 output_size=self._config['output_size'],
                 weight_sizes=self._config['weight_sizes'],
-                use_fid_v2=self._use_fid_v2,
                 num_shards=self._num_shards,
                 batch_size=batch_size,
                 instance_ids=instance_ids,

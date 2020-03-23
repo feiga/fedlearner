@@ -20,6 +20,7 @@ import tensorflow.compat.v1 as tf
 
 from fedlearner.trainer.bridge import Bridge
 from fedlearner.trainer.estimator import FLEstimator
+from fedlearner.trainer.sparse_estimator import SparseFLEstimator
 from fedlearner.trainer.trainer_master_client import LocalTrainerMasterClient
 from fedlearner.trainer.trainer_master_client import TrainerMasterClient
 
@@ -99,7 +100,7 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
     else:
         raise ValueError("Either --master-addr or --data-path must be set")
 
-    estimator = FLEstimator(
+    estimator = SparseFLEstimator(
         model_fn, bridge, trainer_master, role, worker_rank=args.worker_rank,
         cluster_spec=cluster_spec)
     if args.checkpoint_path:

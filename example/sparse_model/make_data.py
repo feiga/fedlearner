@@ -37,7 +37,7 @@ xl = x[:, :x.shape[1]/2]
 xf = x[:, x.shape[1]/2:]
 
 N = 10
-chunk_size = x.shape[0]//N
+chunk_size = 10000 #x.shape[0]//N
 
 for i in range(N):
     filename_l = os.path.join(current_dir, 'data/leader/%02d.tfrecords'%i)

@@ -1,7 +1,22 @@
-#ifndef LAGRANGE_LITE_OPERATORS_COMMON_H_
-#define LAGRANGE_LITE_OPERATORS_COMMON_H_
+// Copyright 2020 The FedLearner Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef FEDLEARNER_CC_OPERATORS_UTILS_COMMON_H_
+#define FEDLEARNER_CC_OPERATORS_UTILS_COMMON_H_
 
 namespace neo {
+
 constexpr uint64_t SLOT_BIT = 10;
 constexpr uint64_t SLOT_BIT_v2 = 15;
 
@@ -49,6 +64,7 @@ inline float atomic_addf(std::atomic<float> &f, float d){
     }
     return desired;
 }
-}
 
-#endif  // LAGRANGE_LITE_OPERATORS_COMMON_H_
+}  // namespace
+
+#endif // LAGRANGE_LITE_OPERATORS_COMMON_H_

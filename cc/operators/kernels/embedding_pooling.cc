@@ -1,19 +1,32 @@
+// Copyright 2020 The FedLearner Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "embedding_pooling.h"
 
 #include "../utils/common.h"
 
-namespace tensorflow
-{
+namespace tensorflow {
+
 using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
 
-namespace functor
-{
+namespace functor {
+
 template <typename T, typename Tidx>
-struct LagrangeEmbeddingPoolingFunctor<CPUDevice, T, Tidx>
-{
+struct LagrangeEmbeddingPoolingFunctor<CPUDevice, T, Tidx> {
     static Status Compute(OpKernelContext *context,
                           int num_shards,
                           bool use_fid_v2,
@@ -90,7 +103,7 @@ struct LagrangeEmbeddingUnpoolingFunctor<CPUDevice, T, Tidx> {
 
 } // namespace functor
 
-// Partition fids to multiple GPU devices
+// Partition fids to multiple devices
 template <typename Device, typename Tidx>
 class LagrangeMultiDevicePreprocessFidOp : public OpKernel {
 public:
@@ -238,45 +251,6 @@ private:
     bool use_fid_v2_;
 };
 
-template <typename Device, typename Tidx>
-class LagrangeQRHashPreprocessFidOp : public OpKernel {
-public:
-    explicit LagrangeQRHashPreprocessFidOp(OpKernelConstruction *context): OpKernel(context) {
-        OP_REQUIRES_OK(context, context->GetAttr("use_fid_v2", &use_fid_v2_));
-    }
-
-    void Compute(OpKernelContext* context) override {
-        auto fids = context->input(0).flat<Tidx>();
-        auto slot_hash_a = context->input(1).flat<Tidx>();
-        auto slot_hash_b = context->input(2).flat<Tidx>();
-        auto num_fids = fids.dimension(0);
-
-        Tensor *output_tensor_a = nullptr;
-        Tensor *output_tensor_b = nullptr;
-        OP_REQUIRES_OK(context, context->allocate_output(0, {num_fids}, &output_tensor_a));
-        OP_REQUIRES_OK(context, context->allocate_output(1, {num_fids}, &output_tensor_b));
-        auto output_a = output_tensor_a->tensor<Tidx, 1>();
-        auto output_b = output_tensor_b->tensor<Tidx, 1>();
-
-        for (auto i = 0; i < num_fids; ++i) {
-            uint64 fid = static_cast<uint64>(fids(i));
-            uint64 slot_id = neo::get_slot(fid, use_fid_v2_);
-            uint64 hash_size = slot_hash_a(slot_id) * slot_hash_b(slot_id);
-            if (hash_size != 0) {
-                uint64 hash_fid = neo::hash_fid(fid, hash_size, use_fid_v2_);
-                output_a(i) = (slot_id << (use_fid_v2_ ? neo::FEATURE_BIT_v2 : neo::FEATURE_BIT)) | (hash_fid % slot_hash_a(slot_id));
-                output_b(i) = (slot_id << (use_fid_v2_ ? neo::FEATURE_BIT_v2 : neo::FEATURE_BIT)) | (hash_fid / slot_hash_a(slot_id));
-            } else {
-                output_a(i) = fid;
-                output_b(i) = fid;
-            }
-        }
-
-    }
-private:
-    bool use_fid_v2_;
-};
-
 template <typename Device, typename T, typename Tidx>
 class LagrangeEmbeddingPoolingOp : public OpKernel {
 public:
@@ -388,11 +362,6 @@ REGISTER_KERNEL_BUILDER(Name("LagrangeMultiDevicePreprocessFid")
                             .TypeConstraint<int64>("Tidx"),
                         LagrangeMultiDevicePreprocessFidOp<CPUDevice, int64>);
 
-REGISTER_KERNEL_BUILDER(Name("LagrangeQrHashPreprocessFid")
-                            .Device(DEVICE_CPU)
-                            .TypeConstraint<int64>("Tidx"),
-                        LagrangeQRHashPreprocessFidOp<CPUDevice, int64>);
-
 REGISTER_KERNEL_BUILDER(Name("LagrangeEmbeddingPooling")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<float>("T")
@@ -405,21 +374,5 @@ REGISTER_KERNEL_BUILDER(Name("LagrangeEmbeddingUnpooling")
                             .TypeConstraint<int64>("Tidx"),
                         LagrangeEmbeddingUnpoolingOp<CPUDevice, float, int64>);
 
-#ifdef GOOGLE_CUDA
-
-REGISTER_KERNEL_BUILDER(Name("LagrangeEmbeddingPooling")
-                            .Device(DEVICE_GPU)
-                            .HostMemory("batch_size")
-                            .TypeConstraint<float>("T")
-                            .TypeConstraint<int64>("Tidx"),
-                        LagrangeEmbeddingPoolingOp<GPUDevice, float, int64>);
-
-REGISTER_KERNEL_BUILDER(Name("LagrangeEmbeddingUnpooling")
-                            .Device(DEVICE_GPU)
-                            .HostMemory("num_unique_fids_per_partition")
-                            .TypeConstraint<float>("T")
-                            .TypeConstraint<int64>("Tidx"),
-                        LagrangeEmbeddingUnpoolingOp<GPUDevice, float, int64>);
-#endif // GOOGLE_CUDA
 } // namespace tensorflow
 
