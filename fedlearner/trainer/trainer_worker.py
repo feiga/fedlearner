@@ -59,9 +59,10 @@ def create_argument_parser():
                         help='Path to save and load model checkpoints.')
     parser.add_argument('--save-checkpoint-steps', type=int, default=1000,
                         help='Number of steps between checkpoints.')
+    parser.add_argument('--sparse-estimator', type=bool, default=False,
+                        help='Whether using sparse estimator.')
 
     return parser
-
 
 def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
     bridge = Bridge(role, int(args.local_addr.split(':')[1]),
@@ -100,9 +101,14 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
     else:
         raise ValueError("Either --master-addr or --data-path must be set")
 
-    estimator = SparseFLEstimator(
-        model_fn, bridge, trainer_master, role, worker_rank=args.worker_rank,
-        cluster_spec=cluster_spec)
+    if args.sparse_estimator:
+        estimator = SparseFLEstimator(
+            model_fn, bridge, trainer_master, role, worker_rank=args.worker_rank,
+            cluster_spec=cluster_spec)
+    else:
+        estimator = FLEstimator(
+            model_fn, bridge, trainer_master, role, worker_rank=args.worker_rank,
+            cluster_spec=cluster_spec)
     if args.checkpoint_path:
         estimator.train(input_fn,
                         checkpoint_path=args.checkpoint_path,

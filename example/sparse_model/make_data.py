@@ -14,7 +14,12 @@
 
 # coding: utf-8
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
+import random
 import shutil
 import numpy as np
 import tensorflow.compat.v1 as tf
@@ -28,16 +33,25 @@ shutil.rmtree(os.path.join(current_dir, 'data'), ignore_errors=True)
 os.makedirs(os.path.join(current_dir, 'data/leader'))
 os.makedirs(os.path.join(current_dir, 'data/follower'))
 
+FEATURE_BITS = 53
 
-(x, y), _ = tf.keras.datasets.mnist.load_data()
-x = x.reshape(x.shape[0], -1).astype(np.float32) / 255.0
-y = y.astype(np.int64)
-
-xl = x[:, :x.shape[1]/2]
-xf = x[:, x.shape[1]/2:]
+LEADER_SLOT_RANGE=(0, 512)
+FOLLOWER_SLOT_RANGE=(512, 1024)
 
 N = 10
-chunk_size = 10000 #x.shape[0]//N
+chunk_size = 10000
+
+def _make_fid(slot_id, hash_value):
+    return int(np.int64(np.uint64((hash_value & ((1 << FEATURE_BITS) - 1)) | (slot_id << FEATURE_BITS))))
+
+def _make_random_fid(slot_id):
+    return _make_fid(slot_id, int(np.int64(random.getrandbits(54))))
+
+def _fake_sample(slot_range):
+    fids = []
+    for slot in slot_range:
+        fids.append(_make_random_fid(slot))
+    return fids
 
 for i in range(N):
     filename_l = os.path.join(current_dir, 'data/leader/%02d.tfrecords'%i)
@@ -51,17 +65,17 @@ for i in range(N):
         features_l['example_id'] = \
             Feature(bytes_list=BytesList(value=[str(idx)]))
         features_l['y'] = \
-            Feature(int64_list=Int64List(value=[y[idx]]))
-        features_l['x'] = \
-            Feature(float_list=FloatList(value=list(xl[idx])))
+            Feature(int64_list=Int64List(value=[random.randint(0, 1)]))
+        features_l['fids'] = \
+            Feature(int64_list=Int64List(value=_fake_sample(LEADER_SLOT_RANGE)))
         fl.write(
             Example(features=Features(feature=features_l)).SerializeToString())
 
         features_f = {}
         features_f['example_id'] = \
             Feature(bytes_list=BytesList(value=[str(idx)]))
-        features_f['x'] = \
-            Feature(float_list=FloatList(value=list(xf[idx])))
+        features_f['fids'] = \
+            Feature(int64_list=Int64List(value=_fake_sample(FOLLOWER_SLOT_RANGE)))
         ff.write(
             Example(features=Features(feature=features_f)).SerializeToString())
 
