@@ -54,8 +54,8 @@ def _fake_sample(slot_range):
     return fids
 
 for i in range(N):
-    filename_l = os.path.join(current_dir, 'data/leader/%02d.tfrecords'%i)
-    filename_f = os.path.join(current_dir, 'data/follower/%02d.tfrecords'%i)
+    filename_l = os.path.join(current_dir, 'data/leader/%02d.tfrecord'%i)
+    filename_f = os.path.join(current_dir, 'data/follower/%02d.tfrecord'%i)
     fl = tf.io.TFRecordWriter(filename_l)
     ff = tf.io.TFRecordWriter(filename_f)
 

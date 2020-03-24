@@ -19,6 +19,7 @@ import tensorflow.compat.v1 as tf
 from tensorflow.compat.v1.train import Optimizer
 from tensorflow.compat.v1.estimator import ModeKeys
 from tensorflow.contrib import graph_editor as ge
+from tensorflow.python.client import timeline
 
 from fedlearner.trainer import embedding
 from fedlearner.trainer import feature
@@ -74,6 +75,8 @@ class SparseFLModel(object):
         return [(n, t) for n, t, _ in self._recvs]
 
     def verify_example_ids(self):
+        if self._config_run:
+            pass
         tensor = tf.strings.to_hash_bucket_fast(self._example_ids, 2**31 - 1)
         if self._role == 'leader':
             self.send('_verify_example_ids', tensor)
@@ -83,6 +86,8 @@ class SparseFLModel(object):
             self._train_ops.append(op)
 
     def send(self, name, tensor, require_grad=False):
+        if self._config_run:
+            pass
         with tf.control_dependencies([self._example_ids]):
             op = self._bridge.send_op(name, tensor)
         self._train_ops.append(op)
@@ -92,6 +97,8 @@ class SparseFLModel(object):
         return None
 
     def recv(self, name, dtype=tf.float32, require_grad=False):
+        if self._config_run:
+            pass
         with tf.control_dependencies([self._example_ids]):
             tensor = self._bridge.receive_op(name, dtype)
         self._recvs.append((name, tensor, require_grad))
@@ -388,14 +395,21 @@ class SparseFLEstimator(object):
                     checkpoint_dir=checkpoint_path,
                     save_checkpoint_steps=save_checkpoint_steps,
                     hooks=spec.training_hooks) as sess:
+                options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                run_metadata = tf.RunMetadata()
                 iter_id = 0
                 while not sess.should_stop():
                     self._bridge.start(iter_id)
                     logging.debug('after bridge start.')
-                    sess.run(spec.train_op, feed_dict={})
+                    sess.run(spec.train_op, feed_dict={}, options=options, run_metadata=run_metadata)
                     logging.debug('after session run.')
                     self._bridge.commit()
                     logging.debug('after bridge commit.')
+                    fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                    chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                    if iter_id % 200 == 0:
+                        with open('timeline_%s_iter%d.json'%(self._role, iter_id), 'w') as f:
+                            f.write(chrome_trace)
                     iter_id += 1
             self._bridge.terminate()
 
@@ -405,7 +419,7 @@ class SparseFLEstimator(object):
                            checkpoint_path=None):
         with tf.Graph().as_default() as g:
             receiver = serving_input_receiver_fn()
-            model = FLModel(self._role,
+            model = SparseFLModel(self._role,
                             self._bridge,
                             receiver.features.get('example_id', None),
                             exporting=True)
