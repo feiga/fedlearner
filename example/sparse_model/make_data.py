@@ -35,14 +35,15 @@ os.makedirs(os.path.join(current_dir, 'data/follower'))
 
 FEATURE_BITS = 53
 
-LEADER_SLOT_RANGE=(0, 512)
-FOLLOWER_SLOT_RANGE=(512, 1024)
+LEADER_SLOT_RANGE = (0, 512)
+FOLLOWER_SLOT_RANGE = (512, 1024)
 
 N = 10
 chunk_size = 10000
 
 def _make_fid(slot_id, hash_value):
-    return int(np.int64(np.uint64((hash_value & ((1 << FEATURE_BITS) - 1)) | (slot_id << FEATURE_BITS))))
+    return int(np.int64(np.uint64((hash_value & ((1 << FEATURE_BITS) - 1)) | \
+                                  (slot_id << FEATURE_BITS))))
 
 def _make_random_fid(slot_id):
     return _make_fid(slot_id, int(np.int64(random.getrandbits(54))))
@@ -75,7 +76,8 @@ for i in range(N):
         features_f['example_id'] = \
             Feature(bytes_list=BytesList(value=[str(idx)]))
         features_f['fids'] = \
-            Feature(int64_list=Int64List(value=_fake_sample(FOLLOWER_SLOT_RANGE)))
+            Feature(int64_list=Int64List(
+                value=_fake_sample(FOLLOWER_SLOT_RANGE)))
         ff.write(
             Example(features=Features(feature=features_f)).SerializeToString())
 

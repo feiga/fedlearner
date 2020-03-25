@@ -21,10 +21,6 @@ from __future__ import print_function
 import os
 import tensorflow.compat.v1 as tf
 
-from tensorflow.python.framework import load_library
-from tensorflow.python.platform import resource_loader
-from tensorflow.python.framework import ops
-
 
 _HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 
@@ -44,9 +40,11 @@ if lagrange_lite_ops is None:
 def _multidevice_preprocess_fids(fids, config, num_shards):
     name = config['name']
     with tf.name_scope("lagrange_multidevice_preprocess_fid/%s"%name):
-        slot_weight_index=tf.constant(config['slot_weight_index'], dtype=tf.int64)
-        slot_hash_size=tf.constant(config['slot_hash_size'], dtype=tf.int64)
-        slot_weight_offset=tf.constant(config['slot_weight_offset'], dtype=tf.int64)
+        slot_weight_index = tf.constant(config['slot_weight_index'],
+                                       dtype=tf.int64)
+        slot_hash_size = tf.constant(config['slot_hash_size'], dtype=tf.int64)
+        slot_weight_offset = tf.constant(config['slot_weight_offset'],
+                                        dtype=tf.int64)
 
         ret = lagrange_lite_ops.lagrange_multi_device_preprocess_fid(
             num_weights=config['num_groups'],
@@ -68,7 +66,8 @@ def _multidevice_preprocess_fids(fids, config, num_shards):
             fmt+'fids': ret[1][i],
             fmt+'num_unique_fids_per_partition': ret[2][i],
             fmt+'fid_to_unique_index': ret[3][i],
-            fmt+'unique_fid_hash': tuple(ret[4][i*config['num_groups']:(i+1)*config['num_groups']])
+            fmt+'unique_fid_hash':
+                tuple(ret[4][i*config['num_groups']:(i+1)*config['num_groups']])
         })
     return features
 
@@ -83,9 +82,11 @@ def _embedding_pooling_gradient(op, grad):
         assert len(candidates) == 1
         return candidates[0].outputs[0]
 
-    num_unique_fids_per_partition = _get_control_input_by_name('num_unique_fids_per_partition')
+    num_unique_fids_per_partition = _get_control_input_by_name(
+        'num_unique_fids_per_partition')
     fid_to_unique_index = _get_control_input_by_name('fid_to_unique_index')
-    unique_fid_hash = [_get_control_input_by_name('unique_fid_hash_%d'%i) for i in range(num_weights)]
+    unique_fid_hash = [_get_control_input_by_name('unique_fid_hash_%d'%i) \
+        for i in range(num_weights)]
 
     assert len(unique_fid_hash) == num_weights
 
@@ -106,7 +107,7 @@ def _embedding_pooling_gradient(op, grad):
     for i, (k, v) in enumerate(zip(unique_fid_hash, values)):
         w = op.inputs[8+i]
         shape = tf.shape(w, out_type=tf.int64)
-        weight_grads.append(tf.IndexedSlices(indices=k, values=v, dense_shape=shape))
+        weight_grads.append(
+            tf.IndexedSlices(indices=k, values=v, dense_shape=shape))
 
     return [None for i in range(8)] + weight_grads
-

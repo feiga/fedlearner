@@ -22,11 +22,13 @@ def get_max_slot(use_fid_v2):
 
 
 def make_fid(slot_id, hash_value):
-    return int(np.int64(np.uint64((hash_value & ((1 << FEATURE_BITS) - 1)) | (slot_id << FEATURE_BITS))))
+    return int(np.int64(np.uint64((hash_value & ((1 << FEATURE_BITS) - 1)) |
+                                  (slot_id << FEATURE_BITS))))
 
 
 def make_fid_v2(slot_id, hash_value):
-    return int(np.int64(np.uint64((hash_value & ((1 << FEATURE_BITS_v2) - 1)) | (slot_id << FEATURE_BITS_v2))))
+    return int(np.int64(np.uint64((hash_value & ((1 << FEATURE_BITS_v2) - 1)) |
+                                  (slot_id << FEATURE_BITS_v2))))
 
 
 def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):

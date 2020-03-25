@@ -170,7 +170,8 @@ class SparseFLModel(object):
         if not slot_list:
             return None
 
-        vec_config = utils._compute_slot_config(slot_list, self._num_embedding_groups)
+        vec_config = utils._compute_slot_config(slot_list,
+            self._num_embedding_groups)
         vec_config['name'] = 'vec'
         vec_config['slot_list'] = slot_list
         vec_config['initializers'] = [fs_map[i]._vec_initializer
@@ -303,23 +304,29 @@ class SparseFLEstimator(object):
 
     def _preprocess_fids(self, fids, configs):
         if fids.indices.shape.rank == 2:
-            fids = tf.IndexedSlices(indices=fids.indices[:, 0], values=fids.values, dense_shape=fids.dense_shape)
-
+            fids = tf.IndexedSlices(indices=fids.indices[:, 0],
+                                    values=fids.values,
+                                    dense_shape=fids.dense_shape)
         features = {}
         for config in configs:
-            features.update(operator._multidevice_preprocess_fids(fids, config, num_shards=1))
+            features.update(operator._multidevice_preprocess_fids(
+                fids, config, num_shards=1))
         return features
 
     def _set_model_configs(self, features, labels, mode):
         with tf.Graph().as_default() as g:
-            M = SparseFLModel(self._role, self._bridge, features['example_id'], config_run=True)
+            M = SparseFLModel(self._role,
+                              self._bridge,
+                              features['example_id'],
+                              config_run=True)
             try:
                 self._model_fn(M, features, labels, mode)
             except ConfigRunError as e:
                 self._bias_slot_configs = M._get_bias_slot_configs()
                 self._vec_slot_configs = M._get_vec_slot_configs()
                 return [self._bias_slot_configs, self._vec_slot_configs]
-        raise UserWarning("Failed to get model config. Did you forget to call freeze_slots in model_fn?")
+        raise UserWarning("Failed to get model config. Did you forget to call \
+                           freeze_slots in model_fn?")
 
     #
     def _sparse_fl_model_fn(self, features, labels, mode):
@@ -329,7 +336,8 @@ class SparseFLEstimator(object):
                 indices=features.pop('fids_indices'),
                 values=features.pop('fids_values'),
                 dense_shape=features.pop('fids_dense_shape'))
-            features.update(self._preprocess_fids(fids, self._slot_configs, mode))
+            features.update(self._preprocess_fids(
+                fids, self._slot_configs, mode))
 
         bias_embedding = embedding.Embedding(self._bias_slot_configs)
         bias_tensor = bias_embedding.lookup(features)
@@ -342,8 +350,10 @@ class SparseFLEstimator(object):
 
         model = SparseFLModel(self._role, self._bridge, features['example_id'],
                               config_run=False,
-                              bias_tensor=bias_tensor, bias_embedding=bias_embedding,
-                              vec_tensor=vec_tensor, vec_embedding=vec_embedding)
+                              bias_tensor=bias_tensor,
+                              bias_embedding=bias_embedding,
+                              vec_tensor=vec_tensor,
+                              vec_embedding=vec_embedding)
 
         spec = self._model_fn(model, features, labels, mode)
         assert model._frozen, "Please finalize model in model_fn"
@@ -382,10 +392,15 @@ class SparseFLEstimator(object):
         with tf.Graph().as_default() as g:
             with tf.device(device_fn):
                 features, labels = input_fn(self._bridge, self._trainer_master)
-                slot_configs = self._set_model_configs(features, labels, ModeKeys.TRAIN)
+                slot_configs = self._set_model_configs(features,
+                                                       labels,
+                                                       ModeKeys.TRAIN)
                 # TODO: preprocess in data pipeline
-                features.update(self._preprocess_fids(features.pop('fids'), slot_configs))
-                spec = self._sparse_fl_model_fn(features, labels, ModeKeys.TRAIN)
+                features.update(self._preprocess_fids(features.pop('fids'),
+                                                      slot_configs))
+                spec = self._sparse_fl_model_fn(features,
+                                                labels,
+                                                ModeKeys.TRAIN)
 
             self._bridge.connect()
             with tf.train.MonitoredTrainingSession(
@@ -401,14 +416,18 @@ class SparseFLEstimator(object):
                 while not sess.should_stop():
                     self._bridge.start(iter_id)
                     logging.debug('after bridge start.')
-                    sess.run(spec.train_op, feed_dict={}, options=options, run_metadata=run_metadata)
+                    sess.run(spec.train_op, feed_dict={}, options=options,
+                             run_metadata=run_metadata)
                     logging.debug('after session run.')
                     self._bridge.commit()
                     logging.debug('after bridge commit.')
-                    fetched_timeline = timeline.Timeline(run_metadata.step_stats)
-                    chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                    fetched_timeline = timeline.Timeline(
+                        run_metadata.step_stats)
+                    chrome_trace = \
+                        fetched_timeline.generate_chrome_trace_format()
                     if iter_id % 200 == 0:
-                        with open('timeline_%s_iter%d.json'%(self._role, iter_id), 'w') as f:
+                        with open('timeline_%s_iter%d.json'%(self._role,
+                                iter_id), 'w') as f:
                             f.write(chrome_trace)
                     iter_id += 1
             self._bridge.terminate()

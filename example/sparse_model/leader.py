@@ -30,7 +30,7 @@ args = parser.parse_args()
 def input_fn(bridge, trainer_master=None):
     dataset = flt.data.DataBlockLoader(
         args.batch_size, ROLE, bridge, trainer_master)
-    feature_map = {"fids": tf.VarLenFeature(tf.int64) }
+    feature_map = {"fids": tf.VarLenFeature(tf.int64)}
     feature_map["example_id"] = tf.FixedLenFeature([], tf.string)
     feature_map["y"] = tf.FixedLenFeature([], tf.int64)
 
@@ -62,10 +62,14 @@ def model_fn(model, features, labels, mode):
     """
     global_step = tf.train.get_or_create_global_step()
 
-    flt.feature.FeatureSlot.set_default_bias_initializer(tf.zeros_initializer())
-    flt.feature.FeatureSlot.set_default_vec_initializer(tf.random_uniform_initializer(-0.0078125, 0.0078125))
-    flt.feature.FeatureSlot.set_default_bias_optimizer(tf.train.FtrlOptimizer(learning_rate=0.01))
-    flt.feature.FeatureSlot.set_default_vec_optimizer(tf.train.AdagradOptimizer(learning_rate=0.01))
+    flt.feature.FeatureSlot.set_default_bias_initializer(
+        tf.zeros_initializer())
+    flt.feature.FeatureSlot.set_default_vec_initializer(
+        tf.random_uniform_initializer(-0.0078125, 0.0078125))
+    flt.feature.FeatureSlot.set_default_bias_optimizer(
+        tf.train.FtrlOptimizer(learning_rate=0.01))
+    flt.feature.FeatureSlot.set_default_vec_optimizer(
+        tf.train.AdagradOptimizer(learning_rate=0.01))
 
     num_slot = 512
     hash_size = 101

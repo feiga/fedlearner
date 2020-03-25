@@ -5,9 +5,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from . import utils
-
 import tensorflow as tf
+from . import utils
 
 
 class FeatureSlice(object):
@@ -24,9 +23,8 @@ class FeatureSlice(object):
         self._end = begin + len
 
     def __repr__(self):
-        return '[FeatureSlice][slot-{}][{}-{}]'.format(self._feature_slot.slot_id,
-                                                       self._begin,
-                                                       self._end)
+        return '[FeatureSlice][slot-{}][{}-{}]'.format(
+                self._feature_slot.slot_id, self._begin, self._end)
 
     def __hash__(self):
         return hash((self._feature_slot.slot_id, self._begin, self._end))
@@ -50,7 +48,7 @@ class FeatureSlice(object):
 class FeatureSlot(object):
     _default_bias_initializer = None
     _default_vec_initializer = None
-    _default_bias_optimizer= None
+    _default_bias_optimizer = None
     _default_vec_optimizer = None
 
     @staticmethod
@@ -84,16 +82,23 @@ class FeatureSlot(object):
         self._hash_table_size = int(hash_table_size)
         self._dtype = tf.float32
 
-        msg = "Please either set {n} or use FeatureSlot.set_default_{n} to set a global default"
+        msg = "Please either set {n} or use FeatureSlot.set_default_{n} \
+               to set a global default"
 
-        self._bias_initializer = bias_initializer or FeatureSlot._default_bias_initializer
-        assert self._bias_initializer is not None, msg.format(n='bias_initializer')
+        self._bias_initializer = bias_initializer or \
+                                 FeatureSlot._default_bias_initializer
+        assert self._bias_initializer is not None, \
+               msg.format(n='bias_initializer')
 
-        self._bias_optimizer = bias_optimizer or FeatureSlot._default_bias_optimizer
-        assert self._bias_optimizer is not None, msg.format(n='bias_optimizer')
+        self._bias_optimizer = bias_optimizer or \
+                               FeatureSlot._default_bias_optimizer
+        assert self._bias_optimizer is not None, \
+               msg.format(n='bias_optimizer')
 
-        self._vec_initializer = vec_initializer or FeatureSlot._default_vec_initializer
-        self._vec_optimizer = vec_optimizer or FeatureSlot._default_vec_optimizer
+        self._vec_initializer = vec_initializer or \
+                                FeatureSlot._default_vec_initializer
+        self._vec_optimizer = vec_optimizer or \
+                              FeatureSlot._default_vec_optimizer
 
         self._feature_dim = 0
         self._slices = []
@@ -119,8 +124,10 @@ class FeatureSlot(object):
         assert not self._frozen, \
             "Cannot modify FeatureSlot after freeze_slots is called"
 
-        msg = "Please either set {n} or use FeatureSlot.set_default_{n} to set a global default"
-        assert self._vec_initializer is not None, msg.format(n='vec_initializer')
+        msg = "Please either set {n} or use FeatureSlot.set_default_{n} \
+               to set a global default"
+        assert self._vec_initializer is not None, \
+               msg.format(n='vec_initializer')
         assert self._vec_optimizer is not None, msg.format(n='vec_optimizer')
 
         sslice = FeatureSlice(self, self._feature_dim, dim)
@@ -141,7 +148,8 @@ class FeatureColumnV1(object):
     def get_vector(self, sslice):
         if self._feature_slot is not sslice._feature_slot or \
             sslice not in self._feature_slot._slices:
-            raise ValueError('{} is not suitable for this FeatureColumn'.format(sslice))
+            raise ValueError('{} is not suitable for this \
+                              FeatureColumn'.format(sslice))
 
         if sslice not in self._placeholder_slices:
             self._placeholder_slices[sslice] = tf.placeholder(
@@ -151,4 +159,3 @@ class FeatureColumnV1(object):
 
     def add_vector(self, dim):
         return self.get_vector(self._feature_slot.add_slice(dim))
-

@@ -19,11 +19,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from fedlearner.trainer import feature
-from fedlearner.trainer import operator
-from fedlearner.trainer import utils
-
 import tensorflow.compat.v1 as tf
+
+from fedlearner.trainer import operator
 
 
 def _sharded_size(total_size, shard_id, num_shards):
@@ -41,12 +39,16 @@ class Embedding(object):
             for i in range(config['num_groups']):
                 shards = []
                 for shard_id in range(self._num_shards):
-                    with tf.device(self._devices[shard_id]), tf.variable_scope('shard_%d'%shard_id):
+                    with tf.device(self._devices[shard_id]), \
+                                   tf.variable_scope('shard_%d'%shard_id):
                         weight_name = 'embedding_weight_' + '_'.join([
-                            str(j) for j, k in enumerate(config['slot_weight_index']) if k == i])
+                            str(j) for j, k in enumerate(
+                                config['slot_weight_index']) if k == i])
                         shards.append(tf.get_variable(
                             name=weight_name,
-                            shape=(_sharded_size(config['weight_hash_sizes'][i], shard_id, self._num_shards), config['weight_sizes'][i]),
+                            shape=(_sharded_size(config['weight_hash_sizes'][i],
+                                                 shard_id, self._num_shards),
+                                   config['weight_sizes'][i]),
                             initializer=config['initializers'][i]
                         ))
                 self._weights.append(shards)
@@ -62,15 +64,20 @@ class Embedding(object):
     def _lookup_one_shard(self, features, shard_id):
         name = self._config['name']
 
-        slot_size=tf.constant(self._config['slot_size'], dtype=tf.int64)
-        slot_weight_index=tf.constant(self._config['slot_weight_index'], dtype=tf.int64)
-        slot_output_offset=tf.constant(self._config['slot_output_offset'], dtype=tf.int64)
-        slot_hash_size=tf.constant(self._config['slot_hash_size'], dtype=tf.int64)
-        slot_weight_offset=tf.constant(self._config['slot_weight_offset'], dtype=tf.int64)
+        slot_size = tf.constant(self._config['slot_size'], dtype=tf.int64)
+        slot_weight_index = tf.constant(self._config['slot_weight_index'],
+                                        dtype=tf.int64)
+        slot_output_offset = tf.constant(self._config['slot_output_offset'],
+                                         dtype=tf.int64)
+        slot_hash_size = tf.constant(self._config['slot_hash_size'],
+                                     dtype=tf.int64)
+        slot_weight_offset = tf.constant(self._config['slot_weight_offset'],
+                                         dtype=tf.int64)
 
         fmt = '%s_%d_'%(name, shard_id)
 
-        num_unique_fids_per_partition = features.pop(fmt+'num_unique_fids_per_partition')
+        num_unique_fids_per_partition = features.pop(
+            fmt+'num_unique_fids_per_partition')
         fid_to_unique_index = features.pop(fmt+'fid_to_unique_index')
         unique_fid_hash = features.pop(fmt+'unique_fid_hash')
         assert isinstance(unique_fid_hash, tuple)
@@ -83,7 +90,8 @@ class Embedding(object):
                         name="%s_Identity_num_unique_fids_per_partition"%(fmt)),
             tf.identity(fid_to_unique_index,
                         name="%s_Identity_fid_to_unique_index"%(fmt)),] + [
-            tf.identity(t, name="%s_Identity_unique_fid_hash_%d"%(fmt, i)) for (i,t) in enumerate(unique_fid_hash)
+            tf.identity(t, name="%s_Identity_unique_fid_hash_%d"%(fmt, i)) \
+                for (i, t) in enumerate(unique_fid_hash)
         ]
 
         with tf.control_dependencies(bwd_deps):
