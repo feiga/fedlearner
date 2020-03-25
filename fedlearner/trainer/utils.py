@@ -34,7 +34,7 @@ def make_fid_v2(slot_id, hash_value):
 def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):
     slot_config = sorted(unsorted_slot_config, key=lambda x: (x[3], x[1]))
     num_slots = len(slot_config)
-    num_keys = len(set([x[3] for x in slot_config]))
+    num_keys = len({[x[3] for x in slot_config]})
 
     if groups < num_keys:
         groups = num_keys
@@ -73,13 +73,13 @@ def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):
     s = num_slots
     while p > 0:
         m = mark[p][s]
-        id, size, hash_size, group_key = slot_config[s - 1]
+        slot_id, size, hash_size, group_key = slot_config[s - 1]
         weight_sizes[p - 1] = size
         weight_group_keys[p - 1] = group_key
         for i in range(m + 1, s + 1):
-            id, size, hash_size, group_key = slot_config[i - 1]
-            slot_weight_index[id] = p - 1
-            slot_weight_offset[id] = weight_hash_sizes[p - 1]
+            slot_id, size, hash_size, group_key = slot_config[i - 1]
+            slot_weight_index[slot_id] = p - 1
+            slot_weight_offset[slot_id] = weight_hash_sizes[p - 1]
             weight_hash_sizes[p - 1] += hash_size
         p = p - 1
         s = m
@@ -107,4 +107,3 @@ def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):
         'slot_weight_offset': slot_weight_offset,
         'output_size': offset
     }
-

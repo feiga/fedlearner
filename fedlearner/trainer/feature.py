@@ -1,5 +1,19 @@
+# Copyright 2020 The FedLearner Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-# -*- encoding=utf-8 -*-
+# coding: utf-8
+# pylint: disable=protected-access
 
 from __future__ import absolute_import
 from __future__ import division
@@ -17,10 +31,10 @@ class FeatureSlice(object):
         begin (int): the start index of this slice
         len (int): the length of this slice
     """
-    def __init__(self, feature_slot, begin, len):
+    def __init__(self, feature_slot, begin, length):
         self._feature_slot = feature_slot
         self._begin = begin
-        self._end = begin + len
+        self._end = begin + length
 
     def __repr__(self):
         return '[FeatureSlice][slot-{}][{}-{}]'.format(
@@ -75,7 +89,7 @@ class FeatureSlot(object):
                  bias_optimizer=None,
                  vec_initializer=None,
                  vec_optimizer=None):
-        assert slot_id >= 0 and slot_id < utils.MAX_SLOTS, \
+        assert 0 <= slot_id < utils.MAX_SLOTS, \
             "Invalid slot id %d"%slot_id
         assert dtype is None, "Only support float32 for now"
         self._slot_id = slot_id
