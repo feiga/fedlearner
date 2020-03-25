@@ -89,10 +89,10 @@ def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):
     slot_hash_size = [0] * get_max_slot(use_fid_v2)
 
     offset = 0
-    for id, size, hash_size, _ in unsorted_slot_config:
-        slot_size[id] = size
-        slot_hash_size[id] = hash_size
-        slot_output_offset[id] = offset
+    for slot_id, size, hash_size, _ in unsorted_slot_config:
+        slot_size[slot_id] = size
+        slot_hash_size[slot_id] = hash_size
+        slot_output_offset[slot_id] = offset
         offset += size
 
     return {
