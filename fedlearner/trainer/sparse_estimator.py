@@ -14,12 +14,9 @@
 # coding: utf-8
 # pylint: disable=protected-access
 
-import logging
 import tensorflow.compat.v1 as tf
-from tensorflow.compat.v1.train import Optimizer
 from tensorflow.compat.v1.estimator import ModeKeys
 from tensorflow.contrib import graph_editor as ge
-from tensorflow.python.client import timeline
 
 from fedlearner.trainer import embedding
 from fedlearner.trainer import estimator
@@ -36,7 +33,8 @@ class SparseFLModel(estimator.FLModel):
                  config_run=True,
                  bias_tensor=None, vec_tensor=None,
                  bias_embedding=None, vec_embedding=None):
-        super(SparseFLModel, self).__init__(role, bridge, example_ids, exporting)
+        super(SparseFLModel, self).__init__(role,
+            bridge, example_ids, exporting)
 
         self._config_run = config_run
         self._num_shards = 1
@@ -54,7 +52,6 @@ class SparseFLModel(estimator.FLModel):
         self._feature_slots = {}
         self._feature_column_v1s = {}
         self._num_embedding_groups = 3
-
 
     def add_feature_slot(self, *args, **kwargs):
         assert not self._frozen, "Cannot modify model after finalization"
@@ -132,7 +129,6 @@ class SparseFLModel(estimator.FLModel):
             for i in vec_config['weight_group_keys']]
         return vec_config
 
-
     def freeze_slots(self, features):
         assert not self._frozen, "Already finalized"
         if self._config_run:
@@ -168,8 +164,6 @@ class SparseFLModel(estimator.FLModel):
         self._frozen = True
 
 
-
-
 class SparseFLEstimator(estimator.FLEstimator):
     def __init__(self,
                  model_fn,
@@ -183,7 +177,6 @@ class SparseFLEstimator(estimator.FLEstimator):
 
         self._bias_slot_configs = None
         self._vec_slot_configs = None
-
 
     def _preprocess_fids(self, fids, configs):
         if fids.indices.shape.rank == 2:
@@ -214,7 +207,7 @@ class SparseFLEstimator(estimator.FLEstimator):
     def _data_preprocess(self, features, labels, mode):
         slot_configs = self._set_model_configs(features,
                                                labels,
-                                               ModeKeys.TRAIN)
+                                               mode)
         features.update(self._preprocess_fids(features.pop('fids'),
                                               slot_configs))
         return features, labels
@@ -247,7 +240,4 @@ class SparseFLEstimator(estimator.FLEstimator):
 
         spec = self._model_fn(model, features, labels, mode)
         assert model._frozen, "Please finalize model in model_fn"
-        return spec
-
-
-
+        return spec, model
