@@ -150,6 +150,18 @@ class FLEstimator(object):
         self._worker_rank = worker_rank
         self._cluster_spec = cluster_spec
 
+
+    def _data_preprocess(self, features, labels):
+        # do nothing
+        return featuers, labels
+
+    def _get_model_spec(self, features, labels, mode):
+        model = FLModel(self._role, self._bridge,
+                        features.get('example_id', None),
+                        exporting=(mode == ModeKeys.PREDICT))
+        spec = self._model_fn(model, features, labels, mode)
+
+
     def train(self,
               input_fn,
               checkpoint_path=None,
@@ -182,9 +194,8 @@ class FLEstimator(object):
         with tf.Graph().as_default() as g:
             with tf.device(device_fn):
                 features, labels = input_fn(self._bridge, self._trainer_master)
-                model = FLModel(self._role, self._bridge,
-                                features['example_id'])
-                spec = self._model_fn(model, features, labels, ModeKeys.TRAIN)
+                features, labels = self._data_preprocess(features, labels, ModeKeys.TRAIN)
+                spec = self._get_model_spec(features, labels, ModeKeys.TRAIN)
 
             self._bridge.connect()
             with tf.train.MonitoredTrainingSession(
@@ -211,12 +222,8 @@ class FLEstimator(object):
                            checkpoint_path=None):
         with tf.Graph().as_default() as g:
             receiver = serving_input_receiver_fn()
-            model = FLModel(self._role,
-                            self._bridge,
-                            receiver.features.get('example_id', None),
-                            exporting=True)
-            spec = self._model_fn(model, receiver.features, None,
-                                  ModeKeys.PREDICT)
+            spec = self._get_model_spec(receiver.features, None,
+                                        ModeKeys.PREDICT, exporting=True)
             assert not model.sends, "Exported model cannot send"
             assert not model.recvs, "Exported model cannot receive"
 
