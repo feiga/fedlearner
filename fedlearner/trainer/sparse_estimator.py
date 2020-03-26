@@ -177,6 +177,9 @@ class SparseFLEstimator(estimator.FLEstimator):
 
         self._bias_slot_configs = None
         self._vec_slot_configs = None
+        self._embedding_devices = [None,] if cluster_spec is None else \
+            ['/job:ps/task:%d'%i for i in range(cluster_spec.num_tasks('ps'))]
+        self._num_shards = len(self._embedding_devices)
 
     def _preprocess_fids(self, fids, configs):
         if fids.indices.shape.rank == 2:
@@ -186,7 +189,7 @@ class SparseFLEstimator(estimator.FLEstimator):
         features = {}
         for config in configs:
             features.update(operator._multidevice_preprocess_fids(
-                fids, config, num_shards=1))
+                fids, config, num_shards=self._num_shards))
         return features
 
     def _set_model_configs(self, features, labels, mode):
@@ -222,10 +225,12 @@ class SparseFLEstimator(estimator.FLEstimator):
             features.update(self._preprocess_fids(
                 fids, self._slot_configs, mode))
 
-        bias_embedding = embedding.Embedding(self._bias_slot_configs)
+        bias_embedding = embedding.Embedding(self._bias_slot_configs,
+                                             devices=self._embedding_devices)
         bias_tensor = bias_embedding.lookup(features)
         if self._vec_slot_configs is not None:
-            vec_embedding = embedding.Embedding(self._vec_slot_configs)
+            vec_embedding = embedding.Embedding(self._vec_slot_configs,
+                                                devices=self._embedding_devices)
             vec_tensor = vec_embedding.lookup(features)
         else:
             vec_embedding = None
