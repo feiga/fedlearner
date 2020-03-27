@@ -13,6 +13,7 @@
 # limitations under the License.
 
 # coding: utf-8
+# pylint: disable=unused-import
 
 import argparse
 import tensorflow.compat.v1 as tf
