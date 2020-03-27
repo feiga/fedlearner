@@ -17,6 +17,8 @@
 import argparse
 import tensorflow.compat.v1 as tf
 
+from fedlearner.trainer import operator
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='FedLearner Parameter Server.')

@@ -97,7 +97,11 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
             'worker': {args.worker_rank: args.tf_addr}})
     elif args.data_path:
         trainer_master = LocalTrainerMasterClient(role, args.data_path)
-        cluster_spec = None
+        ps_addrs = args.ps_addrs.split(",")
+        cluster_spec = tf.train.ClusterSpec({
+            'ps': ps_addrs,
+            'worker': {args.worker_rank: args.tf_addr}})
+        #cluster_spec = None
     else:
         raise ValueError("Either --master-addr or --data-path must be set")
 
