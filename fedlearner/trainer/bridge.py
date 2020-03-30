@@ -93,7 +93,6 @@ class Bridge(object):
         tws_grpc.add_TrainerWorkerServiceServicer_to_server(
             Bridge.TrainerWorkerServicer(self), self._server)
         self._server.add_insecure_port('[::]:%d' % listen_port)
-        self._server.start()
 
     def __del__(self):
         self.terminate()
@@ -129,7 +128,7 @@ class Bridge(object):
                     if response.status.code != common_pb.STATUS_SUCCESS:
                         raise RuntimeError("Trainsmit failed with %d" %
                                            response.status.code)
-                    logging.info("Transmit success with %d",
+                    logging.debug("Transmit success with %d",
                                  response.status.code)
                     with lock:
                         while resend_list and \
@@ -145,12 +144,23 @@ class Bridge(object):
         assert self._connected, "Cannot transmit before connect"
         msg.seq_num = self._next_send_seq_num
         self._next_send_seq_num += 1
+
         if self._streaming_mode:
             self._transmit_queue.put(msg)
-        else:
-            rsp = self._client.Transmit(msg)
-            assert rsp.status.code == common_pb.STATUS_SUCCESS, \
-                "Transmit error with code %d."%rsp.status.code
+            return
+
+        while True:
+            try:
+                rsp = self._client.Transmit(msg)
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                logging.warning("Bridge transmit failed: %s. " \
+                                    "Retry in 1 second...",
+                                e.code().name)
+                time.sleep(1)
+
+        assert rsp.status.code == common_pb.STATUS_SUCCESS, \
+            "Transmit error with code %d."%rsp.status.code
 
     def _transmit_handler(self, request):
         assert self._connected, "Cannot transmit before connect"
@@ -185,6 +195,7 @@ class Bridge(object):
             next_seq_num=self._next_receive_seq_num)
 
     def _data_block_handler(self, request):
+        assert self._connected, "Cannot load data before connect"
         if not self._data_block_handler_fn:
             raise RuntimeError("Received DataBlockMessage but" \
                                 " no handler registered")
@@ -215,9 +226,10 @@ class Bridge(object):
                                         current_iter_id=self._current_iter_id)
 
     def connect(self):
-        if self._role == 'leader':
-            assert not self._connected, "Already connected"
+        assert not self._connected, "Already connected"
+        self._server.start()
 
+        if self._role == 'leader':
             msg = tws_pb.ConnectRequest(app_id=self._app_id,
                                         worker_rank=self._rank)
             while True:
@@ -239,11 +251,11 @@ class Bridge(object):
             logging.debug('Bridge connected as follower')
 
         if self._streaming_mode:
-            logging.info('enter streaming_mode.')
+            logging.debug('enter streaming_mode.')
             self._client_daemon = threading.Thread(
                 target=self._client_daemon_fn)
             self._client_daemon.start()
-        logging.info('finish connect.')
+        logging.debug('finish connect.')
 
     def terminate(self):
         try:

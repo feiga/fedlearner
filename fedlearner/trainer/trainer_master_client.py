@@ -14,42 +14,64 @@
 
 # coding: utf-8
 
-import collections
-import logging
 import os
+import time
+import logging
+import collections
 
 from fedlearner.common import trainer_master_service_pb2 as tm_pb
 from fedlearner.common import trainer_master_service_pb2_grpc as tm_grpc
 from fedlearner.proxy.channel import make_insecure_channel, ChannelType
 from fedlearner.common import common_pb2 as common_pb
+from fedlearner.data_join.data_block_visitor import DataBlockVisitor
 
 DataBlockInfo = collections.namedtuple('DataBlockInfo',
                                        ['block_id', 'data_path'])
+ETCD_NAME = os.environ.get('ETCD_NAME', None)
+ETCD_ADDR = os.environ.get('ETCD_ADDR', None)
+ETCD_BASE_DIR = os.environ.get('ETCD_BASE_DIR', None)
 
 
 class LocalTrainerMasterClient(object):
-    def __init__(self, role, path, files=None, ext='.tfrecord'):
+    def __init__(self,
+                 role,
+                 path,
+                 files=None,
+                 ext='.tfrecord',
+                 start_time=None,
+                 end_time=None,
+                 from_data_source=False):
         self._role = role
         self._path = path
-        if files is None:
-            files = []
-            for filename in os.listdir(path):
-                fullname = os.path.join(path, filename)
-                if not os.path.isfile(fullname):
-                    continue
-                _, fileext = os.path.splitext(filename)
-                if ext and fileext != ext:
-                    continue
-                files.append(filename)
-        files.sort()
         self._block_queue = []
         self._block_map = {}
-        for filename in files:
-            block_id, _ = os.path.splitext(filename)
-            fullname = os.path.join(path, filename)
-            block = DataBlockInfo(block_id, fullname)
-            self._block_queue.append(block)
-            self._block_map[block_id] = block
+        if from_data_source:
+            data_block_visitor = DataBlockVisitor(path, ETCD_NAME,
+                                                  ETCD_BASE_DIR, ETCD_ADDR)
+            # pylint: disable=line-too-long
+            for block_id, block_item in data_block_visitor.LoadDataBlockRepByTimeFrame(
+                    start_time, end_time).items():
+                self._block_queue.append(block_item)
+                self._block_map[block_id] = block_item
+        else:
+            if files is None:
+                files = []
+                for filename in os.listdir(path):
+                    fullname = os.path.join(path, filename)
+                    if not os.path.isfile(fullname):
+                        continue
+                    _, fileext = os.path.splitext(filename)
+                    if ext and fileext != ext:
+                        continue
+                    files.append(filename)
+            files.sort()
+
+            for filename in files:
+                block_id, _ = os.path.splitext(filename)
+                fullname = os.path.join(path, filename)
+                block = DataBlockInfo(block_id, fullname)
+                self._block_queue.append(block)
+                self._block_map[block_id] = block
 
     def request_data_block(self, block_id=None):
         if self._role == 'leader':
@@ -83,9 +105,18 @@ class TrainerMasterClient(object):
             assert block_id, "Must set block_id for follower"
             self._request.block_id = block_id
 
-        result = self._stub.RequestDataBlock(self._request)
+        while True:
+            try:
+                result = self._stub.RequestDataBlock(self._request)
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                logging.warning("Get data block failed: %s. " \
+                                    "Retry in 1 second...",
+                                e.code().name)
+                time.sleep(1)
+
         if result.status.code == common_pb.STATUS_SUCCESS:
-            logging.debug("%s:%d gets block %s at %s", self._role,
+            logging.debug("%s:%d failed to get data block %s at %s", self._role,
                           self._task_id, result.data_block_info.block_id,
                           result.data_block_info.data_path)
             return DataBlockInfo(result.data_block_info.block_id,
