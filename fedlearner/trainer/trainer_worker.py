@@ -152,7 +152,7 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
             model_fn, bridge, trainer_master, role,
             worker_rank=args.worker_rank,
             cluster_spec=cluster_spec)
-        
+
     if args.checkpoint_path:
         estimator.train(input_fn,
                         checkpoint_path=args.checkpoint_path,
