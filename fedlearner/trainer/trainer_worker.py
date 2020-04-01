@@ -22,7 +22,7 @@ from fedlearner.trainer.bridge import Bridge
 from fedlearner.trainer.estimator import FLEstimator
 from fedlearner.trainer.sparse_estimator import SparseFLEstimator
 from fedlearner.trainer.trainer_master_client import LocalTrainerMasterClient
-from fedlearner.trainer.trainer_master_client import TrainerMasterClient
+from fedlearner.trainer.trainer_master_client import TrainerMasterClient, HDFSTrainerMasterClient
 
 
 def create_argument_parser():
@@ -78,6 +78,8 @@ def create_argument_parser():
                         help='Number of steps between checkpoints.')
     parser.add_argument('--sparse-estimator', type=bool, default=False,
                         help='Whether using sparse estimator.')
+    parser.add_argument('--use-hdfs', type=bool, default=False,
+                        help='Whether using sparse estimator.')
 
     return parser
 
@@ -119,7 +121,13 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
             }
         })
     elif args.data_path:
-        trainer_master = LocalTrainerMasterClient(role, args.data_path)
+        if args.use_hdfs:
+            assert args.start_time and args.end_time, "dates of training data need to be specified"
+            trainer_master = HDFSTrainerMasterClient(role, args.data_path, args.start_time,
+                                                                           args.end_time,
+                                                                           shuffle = False)
+        else:
+            trainer_master = LocalTrainerMasterClient(role, args.data_path)
         if args.ps_addrs is not None:
             ps_addrs = args.ps_addrs.split(",")
             cluster_spec = tf.train.ClusterSpec({

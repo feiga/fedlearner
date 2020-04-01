@@ -17,7 +17,9 @@
 import os
 import time
 import logging
+import datetime
 import collections
+import subprocess
 
 from fedlearner.common import trainer_master_service_pb2 as tm_pb
 from fedlearner.common import trainer_master_service_pb2_grpc as tm_grpc
@@ -125,3 +127,62 @@ class TrainerMasterClient(object):
         logging.error("%s:%d gets block failed with error[%s].", self._role,
                       self._task_id, result.status.error_message)
         return None
+
+class HDFSTrainerMasterClient(object):
+    def __init__(self, role, path, start = None, end = None, shuffle = False, file_ext = 'part-'):
+        self._role = role
+        self._block_queue = []
+        self._block_map = {}
+        self._file_ext = file_ext
+
+        # iterate all days
+        curr_date = datetime.datetime.strptime(start, '%Y%m%d')
+        end_date = datetime.datetime.strptime(end, '%Y%m%d')
+        step = datetime.timedelta(days=1)
+        while curr_date <= end_date:
+            curr_path = os.path.join(path, curr_date.strftime('%Y%m%d'))
+            self._add_hdfs_files(curr_date.strftime('%Y%m%d'), curr_path)
+            curr_date += step
+        if shuffle:
+            random.shuffle(self._block_queue)
+
+    def _add_hdfs_files(self, date, path):
+        hdfs = "/data00/tiger/yarn_deploy/hadoop-2.6.0-cdh5.4.4/bin/hdfs"
+        command = "%s dfs -ls %s |  awk '{print $8}'" %(hdfs, path)
+        p = subprocess.Popen(command,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+        cnt = 0
+        used_file_path = []
+        for line in p.stdout.readlines():
+            file_path = line.strip().decode('utf8') # bytes -> str
+            _, file_ext = os.path.splitext(file_path)
+            # print('file_path: ', file_path)
+            if self._file_ext in file_path:
+                block_id = date+os.path.basename(file_path)
+                block = DataBlockInfo(block_id, file_path)
+                self._block_queue.append(block)
+                self._block_map[block_id] = block
+                cnt += 1
+                used_file_path.append(file_path)
+        print('used_file_path: ', used_file_path)
+        logging.info("used_file_path: {0}".format(used_file_path))
+        logging.info("loading {0} files for {1}".format(cnt, path))
+
+    def request_data_block(self, block_id=None):
+        if self._role == 'leader':
+            assert block_id is None, "Must not set block_id for leader"
+            if self._block_queue:
+                ret = self._block_queue.pop(0)
+                logging.debug('Return data block %s', ret)
+                return ret
+            return None
+        elif self._role == 'follower':
+            assert block_id, "Must set block_id for follower"
+            if block_id not in self._block_map:
+                return None
+            return self._block_map[block_id]
+        else:
+            print('unknown role {0}'.format(self._role))
+            return
