@@ -243,7 +243,7 @@ class SparseFLEstimator(estimator.FLEstimator):
                 values=features.pop('fids_values'),
                 dense_shape=features.pop('fids_dense_shape'))
             features.update(self._preprocess_fids(
-                fids, self._slot_configs, mode))
+                fids, self._slot_configs))
 
         bias_embedding = embedding.Embedding(self._bias_slot_configs,
                                              devices=self._embedding_devices)
