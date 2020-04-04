@@ -210,8 +210,6 @@ class SparseFLEstimator(estimator.FLEstimator):
                            freeze_slots in model_fn?")
 
     def _get_features_and_labels_from_input_fn(self, input_fn, mode):
-        #features, labels =  super(SparseFLEstimator, self
-        #    )._get_features_and_labels_from_input_fn(input_fn, mode)
         slot_configs = self._set_model_configs(mode) # features, labels, mode)
         def input_fn_wrapper(*args, **kwargs):
             dataset = input_fn(self._bridge, self._trainer_master)
@@ -227,16 +225,9 @@ class SparseFLEstimator(estimator.FLEstimator):
         return super(SparseFLEstimator, self
             )._get_features_and_labels_from_input_fn(input_fn_wrapper, mode)
 
-
-    def _data_preprocess(self, features, labels, mode):
-        features.update(self._preprocess_fids(features.pop('fids'),
-                                              slot_configs))
-        dataset = tf.data.Dataset.from_tensors(features).prefetch(2)
-        features = dataset.make_initializable_iterator().get_next()
-        return features, labels
-
     def _get_model_spec(self, features, labels, mode):
         features = features.copy()
+        embedding_devices = self._embedding_devices
         if mode == ModeKeys.PREDICT:
             fids = tf.IndexedSlices(
                 indices=features.pop('fids_indices'),
@@ -244,13 +235,14 @@ class SparseFLEstimator(estimator.FLEstimator):
                 dense_shape=features.pop('fids_dense_shape'))
             features.update(self._preprocess_fids(
                 fids, self._slot_configs))
+            embedding_devices = [None,]
 
         bias_embedding = embedding.Embedding(self._bias_slot_configs,
-                                             devices=self._embedding_devices)
+                                             devices=embedding_devices)
         bias_tensor = bias_embedding.lookup(features)
         if self._vec_slot_configs is not None:
             vec_embedding = embedding.Embedding(self._vec_slot_configs,
-                                                devices=self._embedding_devices)
+                                                devices=embedding_devices)
             vec_tensor = vec_embedding.lookup(features)
         else:
             vec_embedding = None
