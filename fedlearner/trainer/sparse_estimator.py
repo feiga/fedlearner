@@ -248,7 +248,8 @@ class SparseFLEstimator(estimator.FLEstimator):
             vec_embedding = None
             vec_tensor = None
 
-        model = SparseFLModel(self._role, self._bridge, features['example_id'],
+        model = SparseFLModel(self._role, self._bridge,
+                              features.get('example_id', None),
                               config_run=False,
                               bias_tensor=bias_tensor,
                               bias_embedding=bias_embedding,
