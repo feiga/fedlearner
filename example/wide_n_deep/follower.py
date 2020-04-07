@@ -90,10 +90,8 @@ def model_fn(model, features, labels, mode):
     elif mode == tf.estimator.ModeKeys.PREDICT:
         return model.make_spec(mode, predictions={'act1_f': act1_f})
 
-import logging
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
     flt.trainer_worker.train(
         ROLE, args, input_fn,
         model_fn, serving_input_receiver_fn)

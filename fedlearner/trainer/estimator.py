@@ -21,7 +21,6 @@ import tensorflow.compat.v1 as tf
 from tensorflow.compat.v1.train import Optimizer
 from tensorflow.compat.v1.estimator import ModeKeys
 from fedlearner.common.etcd_client import EtcdClient
-from tensorflow.python.client import timeline
 
 SYNC_PATH = '/sync/'
 
@@ -234,26 +233,12 @@ class FLEstimator(object):
                     save_checkpoint_steps=save_checkpoint_steps,
                     hooks=spec.training_hooks) as sess:
                 iter_id = 0
-                begin_time = time.time()
                 while not sess.should_stop():
                     self._bridge.start(iter_id)
                     logging.debug('after bridge start.')
-                    if iter_id > 0 and iter_id % 1000 == 0:
-                        options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                        run_metadata = tf.RunMetadata()
-                        sess.run(spec.train_op, feed_dict={}, options=options, run_metadata=run_metadata)
-                        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
-                        chrome_trace = fetched_timeline.generate_chrome_trace_format()
-                    else:
-                        sess.run(spec.train_op, feed_dict={})
-                        chrome_trace = None
+                    sess.run(spec.train_op, feed_dict={})
                     logging.debug('after session run.')
                     self._bridge.commit()
-                    if iter_id > 0 and iter_id % 1000 == 0:
-                        current_time = time.time()
-                        logging.info('iter: {}, throughput: {}.'.format(iter_id, iter_id/(current_time-begin_time)))
-                        with open('timeline_%s_%d.json'%(self._role, iter_id), 'w') as f:
-                            f.write(chrome_trace)
                     logging.debug('after bridge commit.')
                     iter_id += 1
             self._cheif_barriar(is_chief=(self._worker_rank == 0))

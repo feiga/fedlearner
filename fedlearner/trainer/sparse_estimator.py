@@ -204,7 +204,8 @@ class SparseFLEstimator(estimator.FLEstimator):
             except ConfigRunError as e:
                 self._bias_slot_configs = M._get_bias_slot_configs()
                 self._vec_slot_configs = M._get_vec_slot_configs()
-                self._slot_configs =  [self._bias_slot_configs, self._vec_slot_configs]
+                self._slot_configs = [self._bias_slot_configs,
+                                      self._vec_slot_configs]
                 return self._slot_configs
         raise UserWarning("Failed to get model config. Did you forget to call \
                            freeze_slots in model_fn?")

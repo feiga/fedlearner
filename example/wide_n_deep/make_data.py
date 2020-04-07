@@ -17,11 +17,10 @@
 import os
 import random
 import shutil
-import numpy as np
 import tensorflow.compat.v1 as tf
 
 from tensorflow.core.example.example_pb2 import Example
-from tensorflow.core.example.feature_pb2 import FloatList, Features, Feature, \
+from tensorflow.core.example.feature_pb2 import Features, Feature, \
                                                 Int64List, BytesList
 
 current_dir = os.path.dirname(__file__)
