@@ -146,7 +146,7 @@ class Bridge(object):
                     seq_num=-1, # not used for keep alive message
                     keepalive=tws_pb.KeepAliveMessage()
                 )
-            self._transmit_queue.put(msg)
+                self._transmit_queue.put(msg)
             time.sleep(1)
 
     def _client_daemon_fn(self):
