@@ -138,12 +138,16 @@ class Bridge(object):
             stop_event.set()
             return
         self._keepalive_daemon_shutdown_fn = shutdown_fn
+        assert self._streaming_mode and self._connected
         while not stop_event.is_set():
-            is_alive = self._check_remote_heartbeat():
+            with self._transmit_send_lock:
+                msg.seq_num = self._next_send_seq_num
+                msg = tws_pb.TrainerWorkerMessage(
+                    seq_num=-1, # not used for keep alive message
+                    keepalive=tws_pb.KeepAliveMessage()
+                )
+            self._transmit_queue.put(msg)
             time.sleep(1)
-            if not is_alive:
-                logging.debug("check remote alive failed")
-                break
 
     def _client_daemon_fn(self):
         stop_event = threading.Event()
@@ -182,6 +186,10 @@ class Bridge(object):
 
                 generator = client.StreamTransmit(iterator())
                 for response in generator:
+                    if response.next_seq_num == -1:
+                        # keep alive response, ignore
+                        continue
+
                     if response.status.code == common_pb.STATUS_SUCCESS:
                         logging.debug("Message with seq_num=%d is "
                             "confirmed", response.next_seq_num-1)
@@ -246,6 +254,10 @@ class Bridge(object):
     def _transmit_handler(self, request):
         assert self._connected, "Cannot transmit before connect"
         with self._transmit_receive_lock:
+            if request.HasField('keepalive'):
+                # keep alive message, do nothing
+                return tws_pb.TrainerWorkerResponse(next_seq_num=-1)
+
             logging.debug("Received message seq_num=%d."
                           " Wanted seq_num=%d.",
                           request.seq_num, self._next_receive_seq_num)
