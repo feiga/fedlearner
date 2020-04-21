@@ -141,7 +141,6 @@ class Bridge(object):
         assert self._streaming_mode and self._connected
         while not stop_event.is_set():
             with self._transmit_send_lock:
-                msg.seq_num = self._next_send_seq_num
                 msg = tws_pb.TrainerWorkerMessage(
                     seq_num=-1, # not used for keep alive message
                     keepalive=tws_pb.KeepAliveMessage()
