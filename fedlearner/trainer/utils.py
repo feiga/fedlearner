@@ -112,20 +112,20 @@ def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):
         if slot_list == -1:
             return
         for m in slot_list:
-            id, size, hash_size, group_key = slot_config[s - 1]
+            sid, size, hash_size, group_key = slot_config[s - 1]
             weight_sizes[p - 1] = size
             weight_group_keys[p - 1] = group_key
             for i in range(m + 1, s + 1):
-                id, size, hash_size, group_key = slot_config[i - 1]
-                slot_weight_index[id] = p - 1
-                slot_weight_offset[id] = weight_hash_sizes[p - 1]
+                sid, size, hash_size, group_key = slot_config[i - 1]
+                slot_weight_index[sid] = p - 1
+                slot_weight_offset[sid] = weight_hash_sizes[p - 1]
                 weight_hash_sizes[p - 1] += hash_size
                 group_num_slots[p - 1] += 1
             dfs_search(mark, p-1, m)
             # backtracking, restore the state
             for i in range(m + 1, s + 1):
-                id, size, hash_size, group_key = slot_config[i-1]
-                slot_weight_index[id] = -1
+                sid, size, hash_size, group_key = slot_config[i-1]
+                slot_weight_index[sid] = -1
                 weight_hash_sizes[p - 1] -= hash_size
                 group_num_slots[p - 1] -= 1
         return
@@ -156,10 +156,10 @@ def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):
     slot_hash_size = [0] * get_max_slot(use_fid_v2)
 
     offset = 0
-    for id, size, hash_size, _ in unsorted_slot_config:
-        slot_size[id] = size
-        slot_hash_size[id] = hash_size
-        slot_output_offset[id] = offset
+    for sid, size, hash_size, _ in unsorted_slot_config:
+        slot_size[sid] = size
+        slot_hash_size[sid] = hash_size
+        slot_output_offset[sid] = offset
         offset += size
 
     return {
