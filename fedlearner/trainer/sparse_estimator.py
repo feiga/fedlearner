@@ -51,7 +51,7 @@ class SparseFLModel(estimator.FLModel):
         self._slot_ids = []
         self._feature_slots = {}
         self._feature_column_v1s = {}
-        self._num_embedding_groups = 3
+        self._num_embedding_groups = 8
 
     def add_feature_slot(self, *args, **kwargs):
         assert not self._frozen, "Cannot modify model after finalization"
