@@ -13,6 +13,7 @@
 # limitations under the License.
 
 # coding: utf-8
+# pylint: disable=protected-access
 
 import os
 import logging
@@ -20,6 +21,8 @@ import time
 import tensorflow.compat.v1 as tf
 from tensorflow.compat.v1.train import Optimizer
 from tensorflow.compat.v1.estimator import ModeKeys
+from tensorflow_estimator.python.estimator import model_fn as model_fn_lib
+
 from fedlearner.common.etcd_client import EtcdClient
 
 SYNC_PATH = '/sync/'
@@ -116,10 +119,8 @@ class FLModel(object):
                   loss=None,
                   train_op=None,
                   eval_metric_ops=None,
-                  export_outputs=None,
                   training_chief_hooks=None,
                   training_hooks=None,
-                  scaffold=None,
                   evaluation_hooks=None,
                   prediction_hooks=None):
         if isinstance(predictions, tf.Tensor):
@@ -132,10 +133,8 @@ class FLModel(object):
             loss=loss,
             train_op=train_op,
             eval_metric_ops=eval_metric_ops,
-            export_outputs=export_outputs,
             training_chief_hooks=training_chief_hooks,
             training_hooks=training_hooks,
-            scaffold=scaffold,
             evaluation_hooks=evaluation_hooks,
             prediction_hooks=prediction_hooks)
 
@@ -203,8 +202,8 @@ class FLEstimator(object):
                 {'local': {
                     0: local_address
                 }}),
-                                     job_name='local',
-                                     task_index=0)
+                job_name='local',
+                task_index=0)
             target = 'grpc://' + local_address
         else:
             device_fn = None
@@ -224,31 +223,107 @@ class FLEstimator(object):
                     input_fn, ModeKeys.TRAIN)
                 spec, _ = self._get_model_spec(features, labels, ModeKeys.TRAIN)
 
+            # Explicitly add a Saver
+            if not tf.get_collection(tf.GraphKeys.SAVERS):
+                saver = tf.train.Saver(
+                    sharded=True,
+                    defer_build=True,
+                    save_relative_paths=True)  # Must set for portability
+                tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
+
             self._bridge.connect()
-            with tf.train.MonitoredTrainingSession(
+            try:
+                with tf.train.MonitoredTrainingSession(
                     master=target,
                     config=config,
                     is_chief=(self._worker_rank == 0),
                     checkpoint_dir=checkpoint_path,
                     save_checkpoint_steps=save_checkpoint_steps,
                     hooks=spec.training_hooks) as sess:
+                    iter_id = 0
+                    while not sess.should_stop():
+                        self._bridge.start(iter_id)
+                        logging.debug('after bridge start.')
+                        sess.run(spec.train_op, feed_dict={})
+                        logging.debug('after session run.')
+                        self._bridge.commit()
+                        logging.debug('after bridge commit.')
+                        iter_id += 1
+                if self._cluster_spec is not None:
+                    self._cheif_barriar(is_chief=(self._worker_rank == 0))
+            finally:
+                self._bridge.terminate()
+
+        return self
+
+    def evaluate(self,
+                 input_fn,
+                 checkpoint_path=None):
+        if not tf.train.latest_checkpoint(checkpoint_path):
+            raise ValueError(
+                "Could not find trained model at %s" % checkpoint_path)
+
+        with tf.Graph().as_default():
+            features, labels = self._get_features_and_labels_from_input_fn(
+                input_fn, ModeKeys.EVAL)
+            spec, model = self._get_model_spec(features, labels, ModeKeys.EVAL)
+
+            # Track the average loss in default
+            eval_metric_ops = spec.eval_metric_ops or {}
+            if model_fn_lib.LOSS_METRIC_KEY not in eval_metric_ops:
+                loss_metric = tf.metrics.mean(spec.loss)
+                eval_metric_ops[model_fn_lib.LOSS_METRIC_KEY] = loss_metric
+
+            # Create the real eval op
+            update_ops, eval_dict = _extract_metric_update_ops(eval_metric_ops)
+            update_ops.extend(model._train_ops)
+            eval_op = tf.group(*update_ops)
+
+            # Also track the global step
+            if tf.GraphKeys.GLOBAL_STEP in eval_dict:
+                raise ValueError(
+                    'Metric with name `global_step` is not allowed, because '
+                    'Estimator already defines a default metric with the '
+                    'same name.')
+            eval_dict[tf.GraphKeys.GLOBAL_STEP] = \
+                tf.train.get_or_create_global_step()
+
+            # Prepare the session creator.
+            scaffold = tf.train.Scaffold()
+            session_creator = tf.train.ChiefSessionCreator(
+                scaffold=scaffold,
+                checkpoint_dir=checkpoint_path)
+
+            # Prepare hooks
+            all_hooks = list(spec.evaluation_hooks) or []
+            final_ops_hook = tf.train.FinalOpsHook(eval_dict)
+            all_hooks.append(final_ops_hook)
+
+            # Evaluate over dataset
+            self._bridge.connect()
+            with tf.train.MonitoredSession(
+                session_creator=session_creator, hooks=all_hooks) as sess:
                 iter_id = 0
                 while not sess.should_stop():
                     self._bridge.start(iter_id)
                     logging.debug('after bridge start.')
-                    sess.run(spec.train_op, feed_dict={})
+                    sess.run(eval_op)
                     logging.debug('after session run.')
                     self._bridge.commit()
                     logging.debug('after bridge commit.')
                     iter_id += 1
-            self._cheif_barriar(is_chief=(self._worker_rank == 0))
             self._bridge.terminate()
+
+            # Print result
+            logging.info('Metrics for iteration %d: %s',
+                iter_id, _dict_to_str(final_ops_hook.final_ops_values))
+            return final_ops_hook.final_ops_values
 
     def export_saved_model(self,
                            export_dir_base,
                            serving_input_receiver_fn,
                            checkpoint_path=None):
-        with tf.Graph().as_default() as g:
+        with tf.Graph().as_default():
             receiver = serving_input_receiver_fn()
             spec, model = self._get_model_spec(receiver.features, None,
                                                ModeKeys.PREDICT)
@@ -263,4 +338,30 @@ class FLEstimator(object):
                                            receiver.receiver_tensors,
                                            spec.predictions, None)
 
-            return export_dir_base
+        return export_dir_base
+
+
+def _extract_metric_update_ops(eval_dict):
+    """Separate update operations from metric value operations."""
+    update_ops = []
+    value_ops = {}
+    # Sort metrics lexicographically so graph is identical every time.
+    for name in sorted(eval_dict.keys()):
+        metric_tensor, update_op = eval_dict[name]
+        value_ops[name] = metric_tensor
+        update_ops.append(update_op)
+    return update_ops, value_ops
+
+
+def _dict_to_str(dictionary):
+    """Get a `str` representation of a `dict`.
+
+    Args:
+        dictionary: The `dict` to be represented as `str`.
+
+    Returns:
+        A `str` representing the `dictionary`.
+    """
+    return ', '.join('%s = %s' % (k, v)
+                     for k, v in sorted(dictionary.items())
+                     if not isinstance(v, bytes))

@@ -16,7 +16,7 @@
 package v1alpha1
 
 import (
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -24,6 +24,7 @@ import (
 const (
 	DefaultContainerName = "tensorflow"
 	DefaultPortName      = "flapp-port"
+	ChiefWorkerIndex     = "0"
 )
 
 // FLReplicaType can be one of: "Master", "Worker", or "PS".
@@ -36,6 +37,8 @@ const (
 	FLReplicaTypeMaster FLReplicaType = "Master"
 	// FLReplicaTypeWorker is the type for workers of distributed TensorFlow.
 	FLReplicaTypeWorker FLReplicaType = "Worker"
+	// FLReplicaTypeChief is the type for chief worker of distributed TensorFlow.
+	FLReplicaTypeChief FLReplicaType = "Chief"
 )
 
 // RestartPolicy describes how the replicas should be restarted.
@@ -53,7 +56,7 @@ const (
 	// determine the behavior when an error occurs:
 	// - 1-127: permanent error, do not restart.
 	// - 128-255: retryable error, will restart the pod.
-	// RestartPolicyExitCode RestartPolicy = "ExitCode"
+	RestartPolicyExitCode RestartPolicy = "ExitCode"
 )
 
 // ReplicaSpec is a description of the replica
@@ -73,6 +76,11 @@ type ReplicaSpec struct {
 	// One of Always, OnFailure, Never and ExitCode.
 	// Default to OnFailure.
 	RestartPolicy RestartPolicy `json:"restartPolicy,omitempty"`
+
+	// ChiefResources describes the resource requirements of worker0.
+	// +optional
+	// Default to nil.
+	ChiefResources *v1.ResourceRequirements `json:"chiefResources,omitempty"`
 }
 
 // FLReplicaSpecs is the mapping from FLReplicaType to ReplicaSpec
@@ -93,7 +101,7 @@ type PeerSpec struct {
 // PeerSpecs is the mapping from Role to PeerSpec
 type PeerSpecs map[string]PeerSpec
 
-// FLReplicaStatus is a description of pairing status
+// ReplicaStatus is a description of pairing status
 type ReplicaStatus struct {
 	// Local is the set of ID allocated locally
 	Local sets.String `json:"local"`

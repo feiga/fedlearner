@@ -26,12 +26,31 @@ import collections
 from concurrent import futures
 
 import grpc
+import google.protobuf.any_pb2
 import tensorflow.compat.v1 as tf
 
 from fedlearner.common import common_pb2 as common_pb
 from fedlearner.common import trainer_worker_service_pb2 as tws_pb
 from fedlearner.common import trainer_worker_service_pb2_grpc as tws_grpc
 from fedlearner.proxy.channel import make_insecure_channel, ChannelType
+
+
+def make_ready_client(channel, stop_event):
+    channel_ready = grpc.channel_ready_future(channel)
+    wait_secs = 0.5
+    start_time = time.time()
+    while not stop_event.is_set():
+        try:
+            channel_ready.result(timeout=wait_secs)
+            break
+        except grpc.FutureTimeoutError:
+            logging.warning('Channel has not been ready for %.2f seconds',
+                time.time()-start_time)
+            if wait_secs < 5.0:
+                wait_secs *= 1.2
+        except Exception as e:  # pylint: disable=broad-except
+            logging.warning('Waiting channel ready: %s', repr(e))
+    return tws_grpc.TrainerWorkerServiceStub(channel)
 
 
 class Bridge(object):
@@ -60,12 +79,14 @@ class Bridge(object):
                  role,
                  listen_port,
                  remote_address,
-                 app_id='test_trainer',
+                 app_id=None,
                  rank=0,
                  streaming_mode=True):
         self._role = role
         self._listen_port = listen_port
         self._remote_address = remote_address
+        if app_id is None:
+            app_id = 'test_trainer'
         self._app_id = app_id
         self._rank = rank
         self._streaming_mode = streaming_mode
@@ -80,7 +101,14 @@ class Bridge(object):
         self._next_iter_id = 0
         self._received_data = {}
 
-        channel = make_insecure_channel(remote_address, ChannelType.REMOTE)
+        # grpc client
+        self._grpc_options = [
+            ('grpc.max_send_message_length', 2**31-1),
+            ('grpc.max_receive_message_length', 2**31-1)
+        ]
+        channel = make_insecure_channel(
+            remote_address, ChannelType.REMOTE, options=self._grpc_options)
+        self._transmit_send_lock = threading.Lock()
         self._client = tws_grpc.TrainerWorkerServiceStub(channel)
         self._next_send_seq_num = 0
         self._transmit_queue = queue.Queue()
@@ -88,8 +116,11 @@ class Bridge(object):
         self._client_daemon_shutdown_fn = None
 
         # server
+        self._transmit_receive_lock = threading.Lock()
         self._next_receive_seq_num = 0
-        self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+        self._server = grpc.server(
+            futures.ThreadPoolExecutor(max_workers=10),
+            options=self._grpc_options)
         tws_grpc.add_TrainerWorkerServiceServicer_to_server(
             Bridge.TrainerWorkerServicer(self), self._server)
         self._server.add_insecure_port('[::]:%d' % listen_port)
@@ -102,24 +133,42 @@ class Bridge(object):
         return self._role
 
     def _client_daemon_fn(self):
-        shutdown = [False]
+        stop_event = threading.Event()
         generator = None
+        channel = make_insecure_channel(
+            self._remote_address, ChannelType.REMOTE,
+            options=self._grpc_options)
+        client = make_ready_client(channel, stop_event)
+
+        lock = threading.Lock()
+        resend_list = collections.deque()
 
         def shutdown_fn():
-            shutdown[0] = True
+            while True:
+                with lock:
+                    if len(resend_list) > 0:
+                        logging.debug(
+                            "Waiting for resend queue's being cleaned. "
+                            "Resend queue size: %d", len(resend_list))
+                        time.sleep(1)
+                    else:
+                        logging.debug('Resend queue is empty and we can shut '
+                                      'down client daemon safely.')
+                        break
+
+            stop_event.set()
             if generator is not None:
                 generator.cancel()
             return generator.result()
 
         self._client_daemon_shutdown_fn = shutdown_fn
 
-        while not shutdown[0]:
-            lock = threading.Lock()
-            resend_list = collections.deque()
+        while not stop_event.is_set():
             try:
-
                 def iterator():
-                    for item in resend_list:
+                    with lock:
+                        resend_msgs = list(resend_list)
+                    for item in resend_msgs:
                         logging.warning("Streaming resend message seq_num=%d",
                                         item.seq_num)
                         yield item
@@ -131,55 +180,87 @@ class Bridge(object):
                                       item.seq_num)
                         yield item
 
-                generator = self._client.StreamTransmit(iterator())
+                generator = client.StreamTransmit(iterator())
                 for response in generator:
-                    if response.status.code != common_pb.STATUS_SUCCESS:
+                    if response.status.code == common_pb.STATUS_SUCCESS:
+                        logging.debug("Message with seq_num=%d is "
+                            "confirmed", response.next_seq_num-1)
+                    elif response.status.code == \
+                        common_pb.STATUS_MESSAGE_DUPLICATED:
+                        logging.debug("Resent Message with seq_num=%d is "
+                            "confirmed", response.next_seq_num-1)
+                    elif response.status.code == \
+                        common_pb.STATUS_MESSAGE_MISSING:
+                        raise RuntimeError("Message with seq_num=%d is "
+                            "missing!" % (response.next_seq_num-1))
+                    else:
                         raise RuntimeError("Trainsmit failed with %d" %
                                            response.status.code)
-                    logging.debug(
-                        "Streaming confirmed sending message seq_num=%d",
-                        response.next_seq_num-1)
                     with lock:
                         while resend_list and \
                                 resend_list[0].seq_num < response.next_seq_num:
                             resend_list.popleft()
+                        min_seq_num_to_resend = resend_list[0].seq_num \
+                            if resend_list else "NaN"
+                        logging.debug(
+                            "Resend queue size: %d, starting from seq_num=%s",
+                            len(resend_list), min_seq_num_to_resend)
             except Exception as e:  # pylint: disable=broad-except
-                if not shutdown[0]:
-                    logging.warning("Bridge streaming broken: %s. " \
+                if not stop_event.is_set():
+                    logging.warning("Bridge streaming broken: %s.", repr(e))
+            finally:
+                generator.cancel()
+                channel.close()
+                logging.warning(
+                    "Restarting streaming: resend queue size: %d, "
+                    "starting from seq_num=%s", len(resend_list),
+                    resend_list and resend_list[0].seq_num or "NaN")
+                channel = make_insecure_channel(
+                    self._remote_address, ChannelType.REMOTE,
+                    options=self._grpc_options)
+                client = make_ready_client(channel, stop_event)
+                self._check_remote_heartbeat()
+
+    def _transmit(self, msg):
+        assert self._connected, "Cannot transmit before connect"
+        with self._transmit_send_lock:
+            msg.seq_num = self._next_send_seq_num
+            self._next_send_seq_num += 1
+
+            if self._streaming_mode:
+                self._transmit_queue.put(msg)
+                return
+
+            while True:
+                try:
+                    rsp = self._client.Transmit(msg)
+                    assert rsp.status.code == common_pb.STATUS_SUCCESS, \
+                        "Transmit error with code %d."%rsp.status.code
+                    break
+                except Exception as e:  # pylint: disable=broad-except
+                    logging.warning("Bridge transmit failed: %s. " \
                                     "Retry in 1 second...", repr(e))
                     time.sleep(1)
                     self._check_remote_heartbeat()
 
-    def _transmit(self, msg):
-        assert self._connected, "Cannot transmit before connect"
-        msg.seq_num = self._next_send_seq_num
-        self._next_send_seq_num += 1
-
-        if self._streaming_mode:
-            self._transmit_queue.put(msg)
-            return
-
-        while True:
-            try:
-                rsp = self._client.Transmit(msg)
-                break
-            except Exception as e:  # pylint: disable=broad-except
-                logging.warning("Bridge transmit failed: %s. " \
-                                "Retry in 1 second...", repr(e))
-                time.sleep(1)
-                self._check_remote_heartbeat()
-
-        assert rsp.status.code == common_pb.STATUS_SUCCESS, \
-            "Transmit error with code %d."%rsp.status.code
-
     def _transmit_handler(self, request):
         assert self._connected, "Cannot transmit before connect"
-        logging.debug("Received message seq_num=%d."
-                      " Current seq_num=%d.",
-                      request.seq_num, self._next_receive_seq_num)
-        if request.seq_num >= self._next_receive_seq_num:
-            assert request.seq_num == self._next_receive_seq_num, \
-                "Invalid request"
+        with self._transmit_receive_lock:
+            logging.debug("Received message seq_num=%d."
+                          " Wanted seq_num=%d.",
+                          request.seq_num, self._next_receive_seq_num)
+            if request.seq_num > self._next_receive_seq_num:
+                return tws_pb.TrainerWorkerResponse(
+                    status=common_pb.Status(
+                        code=common_pb.STATUS_MESSAGE_MISSING),
+                    next_seq_num=self._next_receive_seq_num)
+            if request.seq_num < self._next_receive_seq_num:
+                return tws_pb.TrainerWorkerResponse(
+                    status=common_pb.Status(
+                        code=common_pb.STATUS_MESSAGE_DUPLICATED),
+                    next_seq_num=self._next_receive_seq_num)
+
+            # request.seq_num == self._next_receive_seq_num
             self._next_receive_seq_num += 1
 
             if request.HasField('start'):
@@ -192,8 +273,7 @@ class Bridge(object):
                     assert request.data.iter_id in self._received_data
                     self._received_data[
                         request.data.iter_id][
-                            request.data.name] = \
-                                tf.make_ndarray(request.data.tensor)
+                            request.data.name] = request.data
                     self._condition.notifyAll()
             elif request.HasField('prefetch'):
                 for func in self._prefetch_handlers:
@@ -204,8 +284,8 @@ class Bridge(object):
                         code=common_pb.STATUS_INVALID_REQUEST),
                     next_seq_num=self._next_receive_seq_num)
 
-        return tws_pb.TrainerWorkerResponse(
-            next_seq_num=self._next_receive_seq_num)
+            return tws_pb.TrainerWorkerResponse(
+                next_seq_num=self._next_receive_seq_num)
 
     def _data_block_handler(self, request):
         assert self._connected, "Cannot load data before connect"
@@ -282,13 +362,17 @@ class Bridge(object):
 
     def terminate(self):
         try:
-            if self._client_daemon_shutdown_fn is not None:
+            if self._client_daemon is not None:
                 self._client_daemon_shutdown_fn()
                 self._client_daemon.join()
         except Exception:  # pylint: disable=broad-except
             pass
         self._server.stop(None)
         logging.debug("Bridge connection terminated")
+
+    @property
+    def current_iter_id(self):
+        return self._current_iter_id
 
     def new_iter_id(self):
         iter_id = self._next_iter_id
@@ -334,11 +418,21 @@ class Bridge(object):
             iter_id=iter_id, sample_ids=sample_ids))
         self._transmit(msg)
 
+    def send_proto(self, iter_id, name, proto):
+        any_proto = google.protobuf.any_pb2.Any()
+        any_proto.Pack(proto)
+        msg = tws_pb.TrainerWorkerMessage(data=tws_pb.DataMessage(
+            iter_id=iter_id, name=name, any_data=any_proto))
+        self._transmit(msg)
+        logging.debug('Data: send protobuf %s for iter %d. seq_num=%d.',
+                      name, iter_id, msg.seq_num)
+
     def send(self, iter_id, name, x):
         msg = tws_pb.TrainerWorkerMessage(data=tws_pb.DataMessage(
             iter_id=iter_id, name=name, tensor=tf.make_tensor_proto(x)))
         self._transmit(msg)
-        logging.debug('Data: send %s for iter %d.', name, iter_id)
+        logging.debug('Data: send %s for iter %d. seq_num=%d.',
+                      name, iter_id, msg.seq_num)
 
     def send_op(self, name, x):
         def func(x):
@@ -348,6 +442,17 @@ class Bridge(object):
         out = tf.py_function(func=func, inp=[x], Tout=[], name='send_' + name)
         return out
 
+    def receive_proto(self, iter_id, name):
+        logging.debug('Data: Waiting to receive proto %s for iter %d.',
+                      name, iter_id)
+        with self._condition:
+            while (iter_id not in self._received_data) \
+                    or (name not in self._received_data[iter_id]):
+                self._condition.wait()
+            data = self._received_data[iter_id][name]
+        logging.debug('Data: received %s for iter %d.', name, iter_id)
+        return data.any_data
+
     def receive(self, iter_id, name):
         logging.debug('Data: Waiting to receive %s for iter %d.', name,
                       iter_id)
@@ -355,9 +460,9 @@ class Bridge(object):
             while (iter_id not in self._received_data) \
                     or (name not in self._received_data[iter_id]):
                 self._condition.wait()
-            x = self._received_data[iter_id][name]
+            data = self._received_data[iter_id][name]
         logging.debug('Data: received %s for iter %d.', name, iter_id)
-        return x
+        return tf.make_ndarray(data.tensor)
 
     def receive_op(self, name, dtype):
         def func():

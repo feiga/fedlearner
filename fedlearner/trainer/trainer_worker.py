@@ -81,7 +81,8 @@ def create_argument_parser():
                         help='Number of steps between checkpoints.')
     parser.add_argument('--sparse-estimator', type=bool, default=False,
                         help='Whether using sparse estimator.')
-
+    parser.add_argument('--mode', type=str, default='train',
+                        help='Train or eval.')
     return parser
 
 def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
@@ -92,7 +93,19 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
         bridge = Bridge(role, int(args.local_addr.split(':')[1]),
                                args.peer_addr)
 
-    if args.cluster_spec:
+    if args.data_path:
+        trainer_master = LocalTrainerMasterClient(role, args.data_path)
+        if args.ps_addrs is not None:
+            ps_addrs = args.ps_addrs.split(",")
+            cluster_spec = tf.train.ClusterSpec({
+                'ps': ps_addrs,
+                'worker': {
+                    args.worker_rank: args.tf_addr
+                }
+            })
+        else:
+            cluster_spec = None
+    elif args.cluster_spec:
         cluster_spec = json.loads(args.cluster_spec)
         assert 'clusterSpec' in cluster_spec, \
             "cluster_spec do not meet legal format"
@@ -113,7 +126,6 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
                 args.worker_rank: args.tf_addr
             }
         })
-
     elif args.master_addr:
         assert args.tf_addr is not None, \
             "--tf-addr must be set when master_addr is set."
@@ -126,18 +138,6 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
                 args.worker_rank: args.tf_addr
             }
         })
-    elif args.data_path:
-        trainer_master = LocalTrainerMasterClient(role, args.data_path)
-        if args.ps_addrs is not None:
-            ps_addrs = args.ps_addrs.split(",")
-            cluster_spec = tf.train.ClusterSpec({
-                'ps': ps_addrs,
-                'worker': {
-                    args.worker_rank: args.tf_addr
-                }
-            })
-        else:
-            cluster_spec = None
     elif args.data_source:
         if args.start_time is None or args.end_time is None:
             raise ValueError(
@@ -161,12 +161,15 @@ def train(role, args, input_fn, model_fn, serving_input_receiver_fn):
             worker_rank=args.worker_rank,
             cluster_spec=cluster_spec)
 
-    if args.checkpoint_path:
+    run_mode = args.mode.lower()
+    if run_mode == 'train':
         estimator.train(input_fn,
                         checkpoint_path=args.checkpoint_path,
                         save_checkpoint_steps=args.save_checkpoint_steps)
+    elif run_mode == 'eval':
+        estimator.evaluate(input_fn, checkpoint_path=args.checkpoint_path)
     else:
-        estimator.train(input_fn)
+        raise ValueError('Allowed values are: --mode=train|eval')
 
     if args.export_path:
         estimator.export_saved_model(args.export_path,

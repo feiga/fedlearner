@@ -16,6 +16,7 @@
 syntax = "proto3";
 import "fedlearner/common/common.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
 package fedlearner.common;
 
@@ -56,16 +57,22 @@ message RawDataManifest {
   JoinExampleRep join_example_rep = 3;
   bool finished = 4;
   int64 next_process_index = 5;
+  int64 peer_dumped_index = 6;
 }
 
 message RawDataMeta {
   string file_path = 1;
   int64 start_index = 2;
+  google.protobuf.Timestamp timestamp = 3;
 }
 
-message RawDataFilePaths {
-  repeated string file_paths = 1;
+message AddedRawDataMetas {
+  repeated RawDataMeta raw_data_metas = 1;
   bool dedup = 2;
+}
+
+message PeerDumpedIndex {
+  int64 peer_dumped_index = 1;
 }
 
 message RawDataRequest {
@@ -76,7 +83,8 @@ message RawDataRequest {
     google.protobuf.Empty sync_example_id = 4;
     google.protobuf.Empty join_example = 5;
     google.protobuf.Empty finish_raw_data = 6;
-    RawDataFilePaths raw_data_fpaths = 7;
+    AddedRawDataMetas added_raw_data_metas = 7;
+    PeerDumpedIndex peer_dumped_index = 8;
   }
 }
 
@@ -85,6 +93,7 @@ message RawDataResponse {
   oneof msg {
     RawDataManifest manifest = 2;
     google.protobuf.Empty finished = 3;
+    google.protobuf.Timestamp timestamp = 4;
   }
 }
 
@@ -97,6 +106,8 @@ service DataJoinMasterService {
   rpc QueryRawDataManifest(RawDataRequest) returns (RawDataManifest) {}
   rpc FinishRawData(RawDataRequest) returns (Status) {}
   rpc AddRawData(RawDataRequest) returns (Status) {}
+  rpc ForwardPeerDumpedIndex(RawDataRequest) returns (Status) {}
+  rpc GetRawDataLatestTimeStamp(RawDataRequest) returns (RawDataResponse) {}
 }
 
 message DataBlockMeta {
@@ -122,6 +133,7 @@ message StartPartitionResponse {
   Status status = 1;
   int64 next_index = 2;
   bool finished = 3;
+  int64 dumped_index = 4;
 }
 
 message LiteExampleIds {
@@ -148,6 +160,12 @@ message SyncPartitionRequest {
   bool compressed = 5;
 }
 
+message SyncPartitionResponse {
+  Status status = 1;
+  int64 next_index = 2;
+  int64 dumped_index = 3;
+}
+
 message FinishPartitionRequest {
   DataSourceMeta data_source_meta = 1;
   int64 rank_id = 2;
@@ -157,12 +175,14 @@ message FinishPartitionRequest {
 message FinishPartitionResponse {
   Status status = 1;
   bool finished = 2;
+  int64 dumped_index = 3;
 }
 
 service DataJoinWorkerService {
   rpc StartPartition(StartPartitionRequest)
       returns (StartPartitionResponse) {}
-  rpc SyncPartition(SyncPartitionRequest) returns (Status) {}
+  rpc SyncPartition(SyncPartitionRequest)
+      returns (SyncPartitionResponse) {}
   rpc FinishPartition(FinishPartitionRequest)
       returns (FinishPartitionResponse) {}
 }
@@ -200,13 +220,36 @@ message ExampleIdDumpOptions {
   int64 example_id_dump_threshold = 2;
 }
 
+message ExampleIdBatchOptions {
+  int64 example_id_batch_size = 1;
+  int64 max_flying_example_id = 2;
+}
+
 message DataJoinWorkerOptions {
   bool use_mock_etcd = 1;
   RawDataOptions raw_data_options = 2;
   ExampleJoinerOptions example_joiner_options = 3;
   ExampleIdDumpOptions example_id_dump_options = 4;
+  ExampleIdBatchOptions example_id_batch_options = 5;
 }
 
 message DataJoinMasterOptions {
   bool use_mock_etcd = 1;
+}
+
+message ExampleValidatorOptions {
+  string example_validator = 1;
+  bool validate_event_time = 2;
+}
+
+message DataJoinPotralOptions {
+  ExampleValidatorOptions example_validator = 1;
+  int64 reducer_buffer_size = 2;
+  RawDataOptions raw_data_options = 3;
+  repeated string downstream_data_source_masters = 4;
+  bool use_mock_etcd = 5;
+}
+
+service DataJoinPotralService {
+  rpc Ping(google.protobuf.Empty) returns (Status) {}
 }

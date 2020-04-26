@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/klog"
 
 	"github.com/bytedance/fedlearner/deploy/kubernetes_operator/pkg/apis/fedlearner.k8s.io/v1alpha1"
+	trainutil "github.com/bytedance/fedlearner/deploy/kubernetes_operator/pkg/util/train"
 )
 
 const (
@@ -28,32 +30,38 @@ const (
 	exitedWithCodeReason = "ExitedWithCode"
 )
 
-func (am *appManager) reconcilePods(app *v1alpha1.FLApp) error {
-	pods, err := am.getPodsForApp(app)
+func (am *appManager) reconcilePods(ctx context.Context, app *v1alpha1.FLApp) error {
+	pods, err := am.getPodsForApp(ctx, app)
 	if err != nil {
 		return err
 	}
 
 	for rtype, spec := range app.Spec.FLReplicaSpecs {
-		err = am.reconcilePodsWithType(app, pods, rtype, spec)
+		terminated, err := am.reconcilePodsWithType(ctx, app, pods, rtype, spec)
 		if err != nil {
 			klog.Errorf("reconcilePods error: %v", err)
 			return err
+		}
+
+		if terminated {
+			am.appStatusUpdater.UpdateAppStateWithRetry(ctx, app, v1alpha1.FLStateFailing)
+			break
 		}
 	}
 	return nil
 }
 
 func (am *appManager) reconcilePodsWithType(
+	ctx context.Context,
 	app *v1alpha1.FLApp,
 	pods []*v1.Pod,
 	rtype v1alpha1.FLReplicaType,
 	spec v1alpha1.ReplicaSpec,
-) error {
+) (terminated bool, err error) {
 	rt := strings.ToLower(string(rtype))
-	pods, err := FilterPodsForReplicaType(pods, rt)
+	pods, err = FilterPodsForReplicaType(pods, rt)
 	if err != nil {
-		return err
+		return false, err
 	}
 	replicas := int(*spec.Replicas)
 	podSlices := am.makePodSlicesByIndex(pods, replicas)
@@ -63,13 +71,13 @@ func (am *appManager) reconcilePodsWithType(
 		case 0:
 			// Need to create a new pod
 			klog.Infof("need to create new pod for %s %d", rtype, index)
-			if err = am.createNewPod(app, rtype, spec, strconv.Itoa(index)); err != nil {
-				return err
+			if err = am.createNewPod(ctx, app, rtype, spec, strconv.Itoa(index)); err != nil {
+				return false, err
 			}
 		case 1:
 			// Check the status of current pod
 			pod := podSlice[0]
-			var exitCode int32 = 0
+			var exitCode int32
 			updateAppReplicaStatuses(app, rtype, pod)
 
 			for _, status := range pod.Status.ContainerStatuses {
@@ -80,28 +88,58 @@ func (am *appManager) reconcilePodsWithType(
 					am.recorder.Eventf(app, v1.EventTypeNormal, exitedWithCodeReason, "Pod: %v.%v exited with code %v", pod.Namespace, pod.Name, exitCode)
 				}
 			}
-			restartPod := spec.RestartPolicy == v1alpha1.RestartPolicyAlways ||
-				(spec.RestartPolicy == v1alpha1.RestartPolicyOnFailure && pod.Status.Phase == v1.PodFailed && exitCode != 0)
-			if restartPod {
-				klog.Infof("Need to restart the pod: %v.%v", pod.Namespace, pod.Name)
-				if err = am.podControl.DeletePod(pod.Namespace, pod.Name, app); err != nil {
-					return err
+			var restartPod bool
+			switch spec.RestartPolicy {
+			case v1alpha1.RestartPolicyAlways:
+				restartPod = true
+
+			case v1alpha1.RestartPolicyOnFailure:
+				if pod.Status.Phase != v1.PodFailed {
+					break
 				}
+
+				if exitCode == 0 {
+					break
+				}
+
+				restartPod = true
+
+			case v1alpha1.RestartPolicyExitCode:
+				if pod.Status.Phase != v1.PodFailed {
+					break
+				}
+
+				// terminate the fedlearner app if the exit code is not retryable.
+				if !trainutil.IsRetryableExitCode(exitCode) {
+					return true, nil
+				}
+
+				restartPod = true
 			}
+
+			if !restartPod {
+				break
+			}
+
+			klog.Infof("Need to restart the pod: %v.%v", pod.Namespace, pod.Name)
+			if err = am.podControl.DeletePod(ctx, pod.Namespace, pod.Name, app); err != nil {
+				return false, err
+			}
+
 		default:
 			// Kill unnecessary pods.
 			for i := 1; i < podCount; i++ {
 				pod := podSlice[i]
-				if err = am.podControl.DeletePod(pod.Namespace, pod.Name, app); err != nil {
-					return err
+				if err = am.podControl.DeletePod(ctx, pod.Namespace, pod.Name, app); err != nil {
+					return false, err
 				}
 			}
 		}
 	}
-	return nil
+	return false, nil
 }
 
-func (am *appManager) getPodsForApp(app *v1alpha1.FLApp) ([]*v1.Pod, error) {
+func (am *appManager) getPodsForApp(ctx context.Context, app *v1alpha1.FLApp) ([]*v1.Pod, error) {
 	// Create selector.
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: GenLabels(app),
@@ -130,7 +168,7 @@ func (am *appManager) getPodsForApp(app *v1alpha1.FLApp) ([]*v1.Pod, error) {
 		return fresh, nil
 	})
 	cm := NewPodControllerRefManager(am.podControl, app, selector, am.GetAPIGroupVersionKind(), canAdoptFunc)
-	return cm.ClaimPods(pods)
+	return cm.ClaimPods(ctx, pods)
 }
 
 // FilterPodsForReplicaType returns pods belong to a replicaType.
@@ -158,6 +196,7 @@ func FilterPodsForReplicaType(pods []*v1.Pod, replicaType string) ([]*v1.Pod, er
 }
 
 func (am *appManager) createNewPod(
+	ctx context.Context,
 	app *v1alpha1.FLApp,
 	rtype v1alpha1.FLReplicaType,
 	spec v1alpha1.ReplicaSpec,
@@ -178,7 +217,7 @@ func (am *appManager) createNewPod(
 	podTemplate := spec.Template.DeepCopy()
 	// The controller will restart pod according to FLReplicaSpec
 	podTemplate.Spec.RestartPolicy = v1.RestartPolicyNever
-	podTemplate.Name = GenIndexName(app.Name, strings.ToLower(app.Spec.Role), rt, index) + string(uuid.NewUUID())
+	podTemplate.Name = GenIndexName(app.Name, strings.ToLower(app.Spec.Role), rt, index) + "-" + string(uuid.NewUUID())
 	if podTemplate.Labels == nil {
 		podTemplate.Labels = make(map[string]string)
 	}
@@ -200,44 +239,55 @@ func (am *appManager) createNewPod(
 		}
 		podTemplate.Spec.Volumes = ensureVolume(podTemplate.Spec.Volumes, volume)
 	}
+
 	for idx := range podTemplate.Spec.Containers {
 		container := &podTemplate.Spec.Containers[idx]
-		if container.Name == v1alpha1.DefaultContainerName {
-			if needPair(app, rtype) {
-				container.VolumeMounts = ensureVolumeMounts(container.VolumeMounts, v1.VolumeMount{
-					Name:      volumeName(rtype),
-					ReadOnly:  true,
-					MountPath: mountPath(rtype),
-				})
-			}
+		if container.Name != v1alpha1.DefaultContainerName {
+			continue
+		}
+
+		if needPair(app, rtype) {
+			container.VolumeMounts = ensureVolumeMounts(container.VolumeMounts, v1.VolumeMount{
+				Name:      volumeName(rtype),
+				ReadOnly:  true,
+				MountPath: mountPath(rtype),
+			})
+		}
+		container.Env = ensureEnv(container.Env, v1.EnvVar{
+			Name:  replicaIndex,
+			Value: index,
+		})
+
+		switch rtype {
+		case v1alpha1.FLReplicaTypeMaster:
 			container.Env = ensureEnv(container.Env, v1.EnvVar{
-				Name:  replicaIndex,
+				Name:  masterService,
+				Value: GenIndexName(app.Name, strings.ToLower(app.Spec.Role), rt, index),
+			})
+
+		case v1alpha1.FLReplicaTypeWorker:
+			container.Env = ensureEnv(container.Env, v1.EnvVar{
+				Name:  workerService,
+				Value: GenIndexName(app.Name, strings.ToLower(app.Spec.Role), rt, index),
+			})
+			container.Env = ensureEnv(container.Env, v1.EnvVar{
+				Name:  workerRank,
 				Value: index,
 			})
-			if rtype == v1alpha1.FLReplicaTypeMaster {
-				container.Env = ensureEnv(container.Env, v1.EnvVar{
-					Name:  masterService,
-					Value: GenIndexName(app.Name, strings.ToLower(app.Spec.Role), rt, index),
-				})
-			} else if rtype == v1alpha1.FLReplicaTypeWorker {
-				container.Env = ensureEnv(container.Env, v1.EnvVar{
-					Name:  workerService,
-					Value: GenIndexName(app.Name, strings.ToLower(app.Spec.Role), rt, index),
-				})
-				container.Env = ensureEnv(container.Env, v1.EnvVar{
-					Name:  workerRank,
-					Value: index,
-				})
-				container.Env = ensureEnv(container.Env, v1.EnvVar{
-					Name:  workerClusterSpec,
-					Value: clusterSpec,
-				})
-			}
-			break
+			container.Env = ensureEnv(container.Env, v1.EnvVar{
+				Name:  workerClusterSpec,
+				Value: clusterSpec,
+			})
 		}
+
+		if index != v1alpha1.ChiefWorkerIndex || spec.ChiefResources == nil {
+			continue
+		}
+
+		container.Resources = *spec.ChiefResources
 	}
 
-	if err := am.podControl.CreatePodsWithControllerRef(am.namespace, podTemplate, app, controllerRef); err != nil && !errors.IsAlreadyExists(err) {
+	if err := am.podControl.CreatePodsWithControllerRef(ctx, am.namespace, podTemplate, app, controllerRef); err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 	return nil

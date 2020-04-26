@@ -25,7 +25,7 @@ import unittest
 import tensorflow.compat.v1 as tf
 import numpy as np
 from tensorflow.compat.v1 import gfile
-from google.protobuf import text_format, empty_pb2
+from google.protobuf import text_format, empty_pb2, timestamp_pb2
 
 import grpc
 
@@ -163,6 +163,10 @@ class DataJoinWorker(unittest.TestCase):
                     max_matching_window=256,
                     data_block_dump_interval=30,
                     data_block_dump_threshold=1000
+                ),
+                example_id_batch_options=dj_pb.ExampleIdBatchOptions(
+                    example_id_batch_size=512,
+                    max_flying_example_id=2048
                 )
             )
 

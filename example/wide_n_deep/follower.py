@@ -15,6 +15,7 @@
 # coding: utf-8
 # pylint: disable=no-else-return, inconsistent-return-statements
 
+import logging
 import tensorflow.compat.v1 as tf
 import fedlearner.trainer as flt
 
@@ -86,12 +87,19 @@ def model_fn(model, features, labels, mode):
         train_op = model.minimize(
             optimizer, act1_f, grad_loss=gact1_f, global_step=global_step)
         return model.make_spec(mode, loss=tf.math.reduce_mean(act1_f),
-                               train_op=train_op,)
-    elif mode == tf.estimator.ModeKeys.PREDICT:
-        return model.make_spec(mode, predictions={'act1_f': act1_f})
+                               train_op=train_op)
+
+    if mode == tf.estimator.ModeKeys.EVAL:
+        model.send('act1_f', act1_f, require_grad=False)
+        fake_loss = tf.reduce_mean(act1_f)
+        return model.make_spec(mode=mode, loss=fake_loss)
+
+    # mode == tf.estimator.ModeKeys.PREDICT:
+    return model.make_spec(mode, predictions={'act1_f': act1_f})
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
     flt.trainer_worker.train(
         ROLE, args, input_fn,
         model_fn, serving_input_receiver_fn)
