@@ -112,6 +112,8 @@ class Bridge(object):
         self._transmit_queue = queue.Queue()
         self._client_daemon = None
         self._client_daemon_shutdown_fn = None
+        self._keepalive_daemon = None
+        self._keepalive_daemon_shutdown_fn = None
 
         # server
         self._transmit_receive_lock = threading.Lock()
@@ -129,6 +131,22 @@ class Bridge(object):
     @property
     def role(self):
         return self._role
+
+    def _keepalive_daemon_fn(self):
+        stop_event = threading.Event()
+        def shutdown_fn():
+            stop_event.set()
+            return
+        self._keepalive_daemon_shutdown_fn = shutdown_fn
+        assert self._streaming_mode and self._connected
+        while not stop_event.is_set():
+            with self._transmit_send_lock:
+                msg = tws_pb.TrainerWorkerMessage(
+                    seq_num=-1, # not used for keep alive message
+                    keepalive=tws_pb.KeepAliveMessage()
+                )
+                self._transmit_queue.put(msg)
+            time.sleep(1)
 
     def _client_daemon_fn(self):
         stop_event = threading.Event()
@@ -167,6 +185,10 @@ class Bridge(object):
 
                 generator = client.StreamTransmit(iterator())
                 for response in generator:
+                    if response.next_seq_num == -1:
+                        # keep alive response, ignore
+                        continue
+
                     if response.status.code == common_pb.STATUS_SUCCESS:
                         logging.debug("Message with seq_num=%d is "
                             "confirmed", response.next_seq_num-1)
@@ -231,6 +253,10 @@ class Bridge(object):
     def _transmit_handler(self, request):
         assert self._connected, "Cannot transmit before connect"
         with self._transmit_receive_lock:
+            if request.HasField('keepalive'):
+                # keep alive message, do nothing
+                return tws_pb.TrainerWorkerResponse(next_seq_num=-1)
+
             logging.debug("Received message seq_num=%d."
                           " Wanted seq_num=%d.",
                           request.seq_num, self._next_receive_seq_num)
@@ -343,6 +369,9 @@ class Bridge(object):
             self._client_daemon = threading.Thread(
                 target=self._client_daemon_fn)
             self._client_daemon.start()
+            self._keepalive_daemon = threading.Thread(
+                target=self._keepalive_daemon_fn)
+            self._keepalive_daemon.start()
         logging.debug('finish connect.')
 
     def terminate(self):
@@ -350,6 +379,9 @@ class Bridge(object):
             if self._client_daemon_shutdown_fn is not None:
                 self._client_daemon_shutdown_fn()
                 self._client_daemon.join()
+            if self._keepalive_daemon_shutdown_fn is not None:
+                self._keepalive_daemon_shutdown_fn()
+                self._keepalive_daemon.join()
         except Exception:  # pylint: disable=broad-except
             pass
         self._server.stop(None)
