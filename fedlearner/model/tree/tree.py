@@ -594,7 +594,7 @@ class BoostingTreeEnsamble(object):
             self._role = self._bridge.role
             self._bridge.connect()
             self._make_key_pair()
-    
+
     @property
     def loss(self):
         return self._loss
@@ -707,7 +707,7 @@ class BoostingTreeEnsamble(object):
         if self._bridge.role == 'leader':
             return self._batch_predict_leader(features, get_raw_score)
         return self._batch_predict_follower(features, get_raw_score)
-    
+
 
     def _batch_predict_local(self, features, get_raw_score):
         N = features.shape[0]
@@ -780,7 +780,7 @@ class BoostingTreeEnsamble(object):
                 assignment = np.maximum(assignment, leader_assignment)
                 self._bridge.commit()
         return np.zeros(N, dtype=BST_TYPE)
-    
+
     def _write_training_log(self, filename, header, metrics, pred):
         fout = tf.io.gfile.GFile(filename, 'a')
         fout.write(header + '\n')
@@ -839,7 +839,8 @@ class BoostingTreeEnsamble(object):
 
             self._trees.append(tree)
             end_time = time.time()
-            logging.info("Elapsed time for one round %s s" % str(end_time-begin_time))
+            logging.info("Elapsed time for one round %s s",
+                         str(end_time-begin_time))
 
             # save check point
             if checkpoint_path is not None:
