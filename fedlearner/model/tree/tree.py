@@ -17,6 +17,7 @@
 import os
 import math
 import queue
+import time
 import logging
 import multiprocessing as mp
 import numpy as np
@@ -154,7 +155,7 @@ class HistogramBuilder(object):
         if self._num_parallel > 1:
             assert pool is not None
             self._job_size = \
-                (len(self._bins.binned) + num_parallel - 1)//num_parallel
+                (len(self._bins.binned[0]) + num_parallel - 1)//num_parallel
 
     def compute_histogram(self, values, sample_ids):
         if not self._pool:
@@ -800,6 +801,7 @@ class BoostingTreeEnsamble(object):
 
         # start iterations
         while len(self._trees) < self._max_iters:
+            begin_time = time.time()
             if self._bridge is None:
                 tree, raw_prediction = self._fit_one_round_local(
                     sum_prediction, binned, labels)
@@ -812,6 +814,8 @@ class BoostingTreeEnsamble(object):
                 tree = self._fit_one_round_follower(binned)
 
             self._trees.append(tree)
+            end_time = time.time()
+            logging.info("Elapsed time for one round %s s" % str(end_time-begin_time))
 
             if checkpoint_path is not None:
                 num_iter = len(self._trees) - 1
