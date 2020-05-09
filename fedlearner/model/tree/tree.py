@@ -224,7 +224,7 @@ class GrowerNode(object):
 class BaseGrower(object):
     def __init__(self, binned, grad, hess, grow_policy='depthwise',
                  max_leaves=None, max_depth=None, learning_rate=0.3,
-                 l2_regularization=1.0, dtype=BST_TYPE, 
+                 l2_regularization=1.0, dtype=BST_TYPE,
                  num_parallel=1, pool=None):
         self._binned = binned
         self._grad = grad
