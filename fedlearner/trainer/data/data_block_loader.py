@@ -47,7 +47,7 @@ class DataBlockLoader(object):
         self._count += 1
         self._block_queue.put(block)
 
-    def _get_next_block(self):
+    def get_next_block(self):
         if self._role == 'leader':
             while True:
                 block = self._trainer_master.request_data_block()
@@ -56,8 +56,8 @@ class DataBlockLoader(object):
                         self._bridge.load_data_block(self._count,
                                                      block.block_id)
                     except Exception as e:  # pylint: disable=broad-except
-                        logging.error('load data block error, detail is %s',
-                                      repr(e))
+                        logging.error('load data block %s with error: %s',
+                                      block.block_id, repr(e))
                         continue
                 else:
                     self._bridge.load_data_block(self._count, '')
@@ -70,7 +70,7 @@ class DataBlockLoader(object):
     def make_dataset(self):
         def gen():
             while True:
-                block = self._get_next_block()
+                block = self.get_next_block()
                 if not block:
                     break
                 yield block.data_path
