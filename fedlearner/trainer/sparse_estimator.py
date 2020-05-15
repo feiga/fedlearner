@@ -97,7 +97,7 @@ class SparseFLModel(estimator.FLModel):
         if not slot_list:
             return None
 
-        bias_config = utils._compute_slot_config(slot_list, 1, 
+        bias_config = utils._compute_slot_config(slot_list, 1,
             use_fid_v2=self._use_fid_v2)
         bias_config['name'] = 'bias'
         bias_config['slot_list'] = slot_list
