@@ -19,7 +19,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+
+import copy
 import sys
+import random
 import numpy as np
 
 SLOT_BITS = 10
@@ -75,39 +78,88 @@ def _compute_slot_config(unsorted_slot_config, groups=None, use_fid_v2=False):
                 c = cost[p - 1][k] + size * hash_size
                 if c < min_cost:
                     min_cost = c
-                    mark[p][s] = k
+                    mark[p][s] = [k]
+                elif c == min_cost:  # multiple equivalent solutions
+                    mark[p][s].append(k)
                 hash_size += slot_config[k - 1][2]
             cost[p][s] = min_cost
 
+    solutions = []
     weight_sizes = [0] * groups
     weight_hash_sizes = [0] * groups
     weight_group_keys = [0] * groups
     slot_weight_index = [-1] * get_max_slot(use_fid_v2)
     slot_weight_offset = [0] * get_max_slot(use_fid_v2)
-    p = groups
-    s = num_slots
-    while p > 0:
-        m = mark[p][s]
-        slot_id, size, hash_size, group_key = slot_config[s - 1]
-        weight_sizes[p - 1] = size
-        weight_group_keys[p - 1] = group_key
-        for i in range(m + 1, s + 1):
-            slot_id, size, hash_size, group_key = slot_config[i - 1]
-            slot_weight_index[slot_id] = p - 1
-            slot_weight_offset[slot_id] = weight_hash_sizes[p - 1]
-            weight_hash_sizes[p - 1] += hash_size
-        p = p - 1
-        s = m
+    group_num_slots = [0] * groups
+
+    solutions = []
+
+    def dfs_search(mark, p, s):
+        if p == 0:  # a solution is fount
+            if s != 0: return  # invalid solution
+            solution = [
+                copy.deepcopy(weight_sizes),
+                copy.deepcopy(weight_hash_sizes),
+                copy.deepcopy(weight_group_keys),
+                copy.deepcopy(slot_weight_index),
+                copy.deepcopy(slot_weight_offset),
+                copy.deepcopy(group_num_slots),
+            ]
+            solutions.append(solution)
+            return
+
+        slot_list = mark[p][s]
+        if slot_list == -1:
+            return
+        for m in slot_list:
+            sid, size, hash_size, group_key = slot_config[s - 1]
+            weight_sizes[p - 1] = size
+            weight_group_keys[p - 1] = group_key
+            for i in range(m + 1, s + 1):
+                sid, size, hash_size, group_key = slot_config[i - 1]
+                slot_weight_index[sid] = p - 1
+                slot_weight_offset[sid] = weight_hash_sizes[p - 1]
+                weight_hash_sizes[p - 1] += hash_size
+                group_num_slots[p - 1] += 1
+            dfs_search(mark, p-1, m)
+            # backtracking, restore the state
+            for i in range(m + 1, s + 1):
+                sid, size, hash_size, group_key = slot_config[i-1]
+                slot_weight_index[sid] = -1
+                weight_hash_sizes[p - 1] -= hash_size
+                group_num_slots[p - 1] -= 1
+        return
+    # Random pruning in case search space may too large
+    random.seed(13)
+    def crop(item, max_len):
+        if len(item) <= max_len:
+            return item
+        item = random.sample(item, max_len)
+        return item
+
+    for i in range(1, len(mark)):
+        for j in range(1, len(mark[0])):
+            if mark[i][j] == -1:
+                continue
+            mark[i][j] = crop(mark[i][j], min(i, 4))
+    dfs_search(mark, p, s)
+
+    # select solution with minimun variance of number slots per group
+    variance = [float(np.var([a * b for a, b in zip(s[5], s[1])])) \
+                for s in solutions]
+    index = variance.index(min(variance))
+    weight_sizes, weight_hash_sizes, weight_group_keys, \
+        slot_weight_index, slot_weight_offset, _ = solutions[index]
 
     slot_size = [0] * get_max_slot(use_fid_v2)
     slot_output_offset = [0] * get_max_slot(use_fid_v2)
     slot_hash_size = [0] * get_max_slot(use_fid_v2)
 
     offset = 0
-    for slot_id, size, hash_size, _ in unsorted_slot_config:
-        slot_size[slot_id] = size
-        slot_hash_size[slot_id] = hash_size
-        slot_output_offset[slot_id] = offset
+    for sid, size, hash_size, _ in unsorted_slot_config:
+        slot_size[sid] = size
+        slot_hash_size[sid] = hash_size
+        slot_output_offset[sid] = offset
         offset += size
 
     return {

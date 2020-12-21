@@ -107,9 +107,12 @@ class FLModel(object):
             if grad is not None:
                 self.send(n + '_grad', grad)
 
-        train_op = optimizer.apply_gradients(grads_and_vars[len(recv_grads):],
-                                             global_step=global_step,
-                                             name=name)
+        if len(grads_and_vars[len(recv_grads):]):
+            train_op = optimizer.apply_gradients(grads_and_vars[len(recv_grads):],
+                                                 global_step=global_step,
+                                                 name=name)
+        else:
+            train_op = tf.no_op()
 
         return train_op
 
@@ -232,26 +235,27 @@ class FLEstimator(object):
                 tf.add_to_collection(tf.GraphKeys.SAVERS, saver)
 
             self._bridge.connect()
-            with tf.train.MonitoredTrainingSession(
-                master=target,
-                config=config,
-                is_chief=(self._worker_rank == 0),
-                checkpoint_dir=checkpoint_path,
-                save_checkpoint_steps=save_checkpoint_steps,
-                hooks=spec.training_hooks) as sess:
-                iter_id = 0
-                while not sess.should_stop():
-                    self._bridge.start(iter_id)
-                    logging.debug('after bridge start.')
-                    sess.run(spec.train_op, feed_dict={})
-                    logging.debug('after session run.')
-                    self._bridge.commit()
-                    logging.debug('after bridge commit.')
-                    iter_id += 1
-
-            if self._cluster_spec is not None:
-                self._cheif_barriar(is_chief=(self._worker_rank == 0))
-            self._bridge.terminate()
+            try:
+                with tf.train.MonitoredTrainingSession(
+                    master=target,
+                    config=config,
+                    is_chief=(self._worker_rank == 0),
+                    checkpoint_dir=checkpoint_path,
+                    save_checkpoint_steps=save_checkpoint_steps,
+                    hooks=spec.training_hooks) as sess:
+                    iter_id = 0
+                    while not sess.should_stop():
+                        self._bridge.start(iter_id)
+                        logging.debug('after bridge start.')
+                        sess.run(spec.train_op, feed_dict={})
+                        logging.debug('after session run.')
+                        self._bridge.commit()
+                        logging.debug('after bridge commit.')
+                        iter_id += 1
+                if self._cluster_spec is not None:
+                    self._cheif_barriar(is_chief=(self._worker_rank == 0))
+            finally:
+                self._bridge.terminate()
 
         return self
 
